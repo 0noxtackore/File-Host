@@ -72,6 +72,34 @@ function renderPreview() {
   });
 }
 
+async function compressImage(file, maxW = 1200, quality = 0.75) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let w = img.width, h = img.height;
+      if (w > maxW) { h = (maxW / w) * h; w = maxW; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+      }, 'image/jpeg', quality);
+    };
+    img.src = url;
+  });
+}
+
+async function prepareFile(file) {
+  if (file.type.startsWith('image/') && file.size > 100000) {
+    toast(`Comprimiendo ${file.name}...`, 'info');
+    return await compressImage(file);
+  }
+  return file;
+}
+
 uploadForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (selectedFiles.length === 0) return toast('Selecciona al menos un archivo', 'error');
@@ -89,17 +117,18 @@ uploadForm.addEventListener('submit', async (e) => {
 
   try {
     for (const file of selectedFiles) {
-      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name}`;
+      const ready = await prepareFile(file);
+      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${ready.name}`;
 
       const { error: uploadErr } = await db.storage
         .from(BUCKET)
-        .upload(path, file, { cacheControl: '3600', upsert: false });
+        .upload(path, ready, { cacheControl: '31536000', upsert: false });
 
       if (uploadErr) throw uploadErr;
 
       const { error: dbErr } = await db
         .from('files')
-        .insert({ name: file.name, mimetype: file.type || 'application/octet-stream', size: file.size, storage_path: path });
+        .insert({ name: file.name, mimetype: file.type || 'application/octet-stream', size: ready.size, storage_path: path });
 
       if (dbErr) throw dbErr;
 
