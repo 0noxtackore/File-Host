@@ -1,0 +1,25 @@
+{
+  "name": "file-host",
+  "version": "1.0.0",
+  "description": "File Host - Mini sistema de hosting de archivos",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "build": "node build.js",
+    "start:prod": "set NODE_ENV=production && node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "uuid": "^14.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

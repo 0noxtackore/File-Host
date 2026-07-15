@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Host</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <header>
+    <div class="header-content">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 22h14a2 2 0 002-2V7.5L14.5 2H6a2 2 0 00-2 2v4"/>
+            <polyline points="14,2 14,8 20,8"/>
+            <path d="M2 15h10"/>
+            <path d="M9 12l3 3-3 3"/>
+          </svg>
+        </div>
+        <h1>File Host</h1>
+      </div>
+      <div class="header-actions">
+        <div class="search-box">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="searchInput" placeholder="Buscar archivos...">
+        </div>
+        <button id="uploadBtn" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Subir
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <div id="stats" class="stats"></div>
+      <div class="view-toggle">
+        <button id="gridViewBtn" class="view-btn active" title="Vista cuadrícula">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+          </svg>
+        </button>
+        <button id="listViewBtn" class="view-btn" title="Vista lista">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+            <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
+            <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="gallery" class="gallery"></div>
+    <div id="empty" class="empty" style="display:none;">
+      <div class="empty-icon">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/>
+          <polyline points="13,2 13,9 20,9"/>
+        </svg>
+      </div>
+      <h2>No hay archivos</h2>
+      <p>Arrastra archivos o haz clic en "Subir" para comenzar</p>
+    </div>
+    <div id="noResults" class="empty" style="display:none;">
+      <div class="empty-icon">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+      </div>
+      <h2>Sin resultados</h2>
+      <p>No se encontraron archivos que coincidan con tu búsqueda</p>
+    </div>
+  </main>
+
+  <div id="uploadModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Subir Archivo(s)</h2>
+        <button class="close-btn" data-close>&times;</button>
+      </div>
+      <form id="uploadForm">
+        <div class="drop-zone" id="dropZone">
+          <div class="drop-zone-content">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17,8 12,3 7,8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <p class="drop-text">Arrastra archivos aquí</p>
+            <p class="drop-sub">o haz clic para seleccionar</p>
+          </div>
+          <input type="file" id="fileInput" multiple hidden>
+        </div>
+        <div id="filePreview" class="file-preview"></div>
+        <div id="uploadProgress" class="upload-progress" style="display:none;">
+          <div class="progress-info">
+            <span>Subiendo...</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="submitBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+            <polyline points="17,8 12,3 7,8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Subir Archivo(s)
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div id="detailModal" class="modal">
+    <div class="modal-content modal-detail">
+      <div class="modal-header">
+        <h2 id="detailTitle">Detalle</h2>
+        <button class="close-btn" data-close>&times;</button>
+      </div>
+      <div id="detailBody"></div>
+      <div class="detail-actions">
+        <a id="detailDownload" class="btn btn-primary" download>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+            <polyline points="7,10 12,15 17,10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Descargar
+        </a>
+        <button id="detailDeleteBtn" class="btn btn-danger">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3,6 5,6 21,6"/>
+            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+          </svg>
+          Eliminar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirmModal" class="modal">
+    <div class="modal-content modal-confirm">
+      <div class="confirm-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <h2>Eliminar archivo</h2>
+      <p>Esta acción no se puede deshacer. ¿Estás seguro?</p>
+      <div class="confirm-actions">
+        <button id="cancelDeleteBtn" class="btn btn-secondary">Cancelar</button>
+        <button id="confirmDeleteBtn" class="btn btn-danger">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
