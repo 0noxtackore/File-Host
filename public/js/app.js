@@ -91,13 +91,13 @@ uploadForm.addEventListener('submit', async (e) => {
     for (const file of selectedFiles) {
       const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name}`;
 
-      const { error: uploadErr } = await supabase.storage
+      const { error: uploadErr } = await db.storage
         .from(BUCKET)
         .upload(path, file, { cacheControl: '3600', upsert: false });
 
       if (uploadErr) throw uploadErr;
 
-      const { error: dbErr } = await supabase
+      const { error: dbErr } = await db
         .from('files')
         .insert({ name: file.name, mimetype: file.type || 'application/octet-stream', size: file.size, storage_path: path });
 
@@ -123,7 +123,7 @@ uploadForm.addEventListener('submit', async (e) => {
 
 async function loadFiles() {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('files')
       .select('*')
       .order('created_at', { ascending: false });
@@ -189,7 +189,7 @@ function renderGallery(files) {
 }
 
 function getFileUrl(path) {
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const { data } = db.storage.from(BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }
 
@@ -297,8 +297,8 @@ $('#cancelDeleteBtn').addEventListener('click', () => closeModal(confirmModal));
 $('#confirmDeleteBtn').addEventListener('click', async () => {
   if (!currentFile) return;
   try {
-    await supabase.storage.from(BUCKET).remove([currentFile.storage_path]);
-    await supabase.from('files').delete().eq('id', currentFile.id);
+    await db.storage.from(BUCKET).remove([currentFile.storage_path]);
+    await db.from('files').delete().eq('id', currentFile.id);
     closeModal(confirmModal);
     toast('Archivo eliminado', 'success');
     loadFiles();
