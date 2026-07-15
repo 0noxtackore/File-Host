@@ -1,5 +1,5 @@
 let selectedFiles = [];
-let currentFileId = null;
+let currentFile = null;
 let allFiles = [];
 let viewMode = 'grid';
 
@@ -19,39 +19,24 @@ const filePreview = $('#filePreview');
 const uploadForm = $('#uploadForm');
 const searchInput = $('#searchInput');
 
-/* ===== TOASTS ===== */
-function toast(message, type = 'info') {
+function toast(msg, type = 'info') {
   const icons = { success: '✓', error: '✕', info: 'ℹ' };
-  const container = $('#toastContainer');
+  const c = $('#toastContainer');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.innerHTML = `<span class="toast-icon">${icons[type]}</span><span class="toast-msg">${message}</span>`;
-  container.appendChild(el);
-  setTimeout(() => {
-    el.classList.add('removing');
-    setTimeout(() => el.remove(), 300);
-  }, 3000);
+  el.innerHTML = `<span class="toast-icon">${icons[type]}</span><span class="toast-msg">${msg}</span>`;
+  c.appendChild(el);
+  setTimeout(() => { el.classList.add('removing'); setTimeout(() => el.remove(), 300); }, 3000);
 }
 
-/* ===== MODALS ===== */
-function openModal(modal) { modal.classList.add('active'); }
-function closeModal(modal) { modal.classList.remove('active'); }
+function openModal(m) { m.classList.add('active'); }
+function closeModal(m) { m.classList.remove('active'); }
+function closeAll() { [uploadModal, detailModal, confirmModal].forEach(m => closeModal(m)); }
 
-function closeAll() {
-  [uploadModal, detailModal, confirmModal].forEach(m => closeModal(m));
-}
+$$('[data-close]').forEach(b => b.addEventListener('click', closeAll));
+$$('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModal(m); }));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
 
-$$('[data-close]').forEach(btn => btn.addEventListener('click', closeAll));
-
-$$('.modal').forEach(modal => {
-  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(modal); });
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeAll();
-});
-
-/* ===== UPLOAD ===== */
 $('#uploadBtn').addEventListener('click', () => {
   selectedFiles = [];
   filePreview.innerHTML = '';
@@ -61,13 +46,9 @@ $('#uploadBtn').addEventListener('click', () => {
 });
 
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('dragover');
-  addFiles(e.dataTransfer.files);
-});
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); addFiles(e.dataTransfer.files); });
 fileInput.addEventListener('change', () => addFiles(fileInput.files));
 
 function addFiles(fileList) {
@@ -86,22 +67,14 @@ function renderPreview() {
       <span class="remove-tag" data-idx="${i}">&times;</span>
     </div>
   `).join('');
-
   filePreview.querySelectorAll('.remove-tag').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      selectedFiles.splice(parseInt(el.dataset.idx), 1);
-      renderPreview();
-    });
+    el.addEventListener('click', e => { e.stopPropagation(); selectedFiles.splice(parseInt(el.dataset.idx), 1); renderPreview(); });
   });
 }
 
 uploadForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (selectedFiles.length === 0) return toast('Selecciona al menos un archivo', 'error');
-
-  const fd = new FormData();
-  selectedFiles.forEach(f => fd.append('files', f));
 
   const submitBtn = $('#submitBtn');
   const progress = $('#uploadProgress');
@@ -111,29 +84,33 @@ uploadForm.addEventListener('submit', async (e) => {
   submitBtn.disabled = true;
   progress.style.display = 'block';
 
+  const total = selectedFiles.length;
+  let done = 0;
+
   try {
-    const xhr = new XMLHttpRequest();
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 100);
-        progressFill.style.width = pct + '%';
-        progressPercent.textContent = pct + '%';
-      }
-    });
+    for (const file of selectedFiles) {
+      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name}`;
 
-    await new Promise((resolve, reject) => {
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve();
-        else reject(new Error(JSON.parse(xhr.responseText).error));
-      };
-      xhr.onerror = () => reject(new Error('Error de red'));
-      xhr.open('POST', '/api/files');
-      xhr.send(fd);
-    });
+      const { error: uploadErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { cacheControl: '3600', upsert: false });
 
-    const count = selectedFiles.length;
+      if (uploadErr) throw uploadErr;
+
+      const { error: dbErr } = await supabase
+        .from('files')
+        .insert({ name: file.name, mimetype: file.type || 'application/octet-stream', size: file.size, storage_path: path });
+
+      if (dbErr) throw dbErr;
+
+      done++;
+      const pct = Math.round((done / total) * 100);
+      progressFill.style.width = pct + '%';
+      progressPercent.textContent = pct + '%';
+    }
+
     closeModal(uploadModal);
-    toast(`${count} archivo(s) subido(s)`, 'success');
+    toast(`${done} archivo(s) subido(s)`, 'success');
     loadFiles();
   } catch (err) {
     toast('Error: ' + err.message, 'error');
@@ -144,28 +121,31 @@ uploadForm.addEventListener('submit', async (e) => {
   }
 });
 
-/* ===== LOAD & RENDER ===== */
 async function loadFiles() {
   try {
-    const res = await fetch('/api/files');
-    allFiles = await res.json();
+    const { data, error } = await supabase
+      .from('files')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    allFiles = data || [];
     renderGallery(allFiles);
   } catch (err) {
-    gallery.innerHTML = '<p style="color:var(--danger)">Error al cargar archivos</p>';
+    gallery.innerHTML = '<p style="color:var(--danger)">Error al cargar archivos: ' + err.message + '</p>';
   }
 }
 
 function getFilteredFiles() {
   const q = searchInput.value.toLowerCase().trim();
   if (!q) return allFiles;
-  return allFiles.filter(f => f.original_name.toLowerCase().includes(q));
+  return allFiles.filter(f => f.name.toLowerCase().includes(q));
 }
 
 searchInput.addEventListener('input', () => renderGallery(getFilteredFiles()));
 
 function renderGallery(files) {
   const hasSearch = searchInput.value.trim().length > 0;
-
   if (allFiles.length === 0 && !hasSearch) {
     gallery.innerHTML = '';
     empty.style.display = 'block';
@@ -173,16 +153,13 @@ function renderGallery(files) {
     stats.textContent = '';
     return;
   }
-
   empty.style.display = 'none';
-
   if (files.length === 0) {
     gallery.innerHTML = '';
     noResults.style.display = 'block';
     stats.textContent = '';
     return;
   }
-
   noResults.style.display = 'none';
 
   const totalSize = files.reduce((a, f) => a + f.size, 0);
@@ -191,13 +168,13 @@ function renderGallery(files) {
   gallery.innerHTML = files.map((f, i) => `
     <div class="card" data-id="${f.id}" style="animation-delay: ${i * 0.04}s">
       <div class="card-preview">
-        <span class="card-type-badge">${getExtension(f.original_name)}</span>
-        ${f.mimetype.startsWith('image/')
-          ? `<img src="/uploads/${f.filename}" alt="${esc(f.original_name)}" loading="lazy">`
+        <span class="card-type-badge">${getExtension(f.name)}</span>
+        ${f.mimetype && f.mimetype.startsWith('image/')
+          ? `<img src="${getFileUrl(f.storage_path)}" alt="${esc(f.name)}" loading="lazy">`
           : `<div class="icon-placeholder">${getIcon(f.mimetype)}</div>`}
       </div>
       <div class="card-info">
-        <h3 title="${esc(f.original_name)}">${esc(f.original_name)}</h3>
+        <h3 title="${esc(f.name)}">${esc(f.name)}</h3>
         <div class="meta">
           <span>${formatSize(f.size)}</span>
           <span>${formatDate(f.created_at)}</span>
@@ -207,11 +184,15 @@ function renderGallery(files) {
   `).join('');
 
   gallery.querySelectorAll('.card').forEach(card => {
-    card.addEventListener('click', () => showDetail(parseInt(card.dataset.id)));
+    card.addEventListener('click', () => showDetail(card.dataset.id));
   });
 }
 
-/* ===== VIEW TOGGLE ===== */
+function getFileUrl(path) {
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
 $('#gridViewBtn').addEventListener('click', () => setView('grid'));
 $('#listViewBtn').addEventListener('click', () => setView('list'));
 
@@ -222,8 +203,8 @@ function setView(mode) {
   $('#listViewBtn').classList.toggle('active', mode === 'list');
 }
 
-/* ===== HELPERS ===== */
 function getIcon(mimetype) {
+  if (!mimetype) return '📁';
   if (mimetype.startsWith('video/')) return '🎬';
   if (mimetype.startsWith('audio/')) return '🎵';
   if (mimetype === 'application/pdf') return '📄';
@@ -234,11 +215,11 @@ function getIcon(mimetype) {
 
 function getExtension(name) {
   const ext = name.split('.').pop();
-  return ext.length <= 6 ? ext.toUpperCase() : 'FILE';
+  return ext && ext.length <= 6 ? ext.toUpperCase() : 'FILE';
 }
 
 function formatSize(bytes) {
-  if (bytes === 0) return '0 B';
+  if (!bytes) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -247,7 +228,7 @@ function formatSize(bytes) {
 
 function formatDate(dateStr) {
   if (!dateStr) return '';
-  const d = new Date(dateStr + 'Z');
+  const d = new Date(dateStr);
   return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
@@ -257,60 +238,55 @@ function esc(str) {
   return d.innerHTML;
 }
 
-/* ===== DETAIL ===== */
 async function showDetail(id) {
-  try {
-    const res = await fetch(`/api/files/${id}`);
-    const file = await res.json();
-    currentFileId = file.id;
+  const file = allFiles.find(f => f.id === id);
+  if (!file) return;
 
-    $('#detailTitle').textContent = file.original_name;
+  currentFile = file;
+  $('#detailTitle').textContent = file.name;
 
-    const isImage = file.mimetype.startsWith('image/');
-    const isVideo = file.mimetype.startsWith('video/');
-    const isAudio = file.mimetype.startsWith('audio/');
+  const url = getFileUrl(file.storage_path);
+  const isImage = file.mimetype && file.mimetype.startsWith('image/');
+  const isVideo = file.mimetype && file.mimetype.startsWith('video/');
+  const isAudio = file.mimetype && file.mimetype.startsWith('audio/');
 
-    let mediaHtml = '';
-    if (isImage) {
-      mediaHtml = `<img class="detail-img" src="/uploads/${file.filename}" alt="${esc(file.original_name)}">`;
-    } else if (isVideo) {
-      mediaHtml = `<video class="detail-img" src="/uploads/${file.filename}" controls></video>`;
-    } else if (isAudio) {
-      mediaHtml = `<audio style="width:100%;margin-bottom:1rem;border-radius:var(--radius-sm);" src="/uploads/${file.filename}" controls></audio>`;
-    }
-
-    $('#detailBody').innerHTML = `
-      ${mediaHtml}
-      <div class="detail-info">
-        <div class="detail-info-row">
-          <span class="label">Nombre</span>
-          <span class="value">${esc(file.original_name)}</span>
-        </div>
-        <div class="detail-info-row">
-          <span class="label">Tipo</span>
-          <span class="value">${file.mimetype}</span>
-        </div>
-        <div class="detail-info-row">
-          <span class="label">Tamaño</span>
-          <span class="value">${formatSize(file.size)}</span>
-        </div>
-        <div class="detail-info-row">
-          <span class="label">Subido</span>
-          <span class="value">${formatDate(file.created_at)}</span>
-        </div>
-      </div>
-    `;
-
-    $('#detailDownload').href = `/uploads/${file.filename}`;
-    $('#detailDownload').download = file.original_name;
-
-    openModal(detailModal);
-  } catch (err) {
-    toast('Error al cargar detalle', 'error');
+  let mediaHtml = '';
+  if (isImage) {
+    mediaHtml = `<img class="detail-img" src="${url}" alt="${esc(file.name)}">`;
+  } else if (isVideo) {
+    mediaHtml = `<video class="detail-img" src="${url}" controls></video>`;
+  } else if (isAudio) {
+    mediaHtml = `<audio style="width:100%;margin-bottom:1rem;border-radius:var(--radius-sm);" src="${url}" controls></audio>`;
   }
+
+  $('#detailBody').innerHTML = `
+    ${mediaHtml}
+    <div class="detail-info">
+      <div class="detail-info-row">
+        <span class="label">Nombre</span>
+        <span class="value">${esc(file.name)}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="label">Tipo</span>
+        <span class="value">${file.mimetype || 'Desconocido'}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="label">Tamaño</span>
+        <span class="value">${formatSize(file.size)}</span>
+      </div>
+      <div class="detail-info-row">
+        <span class="label">Subido</span>
+        <span class="value">${formatDate(file.created_at)}</span>
+      </div>
+    </div>
+  `;
+
+  $('#detailDownload').href = url;
+  $('#detailDownload').download = file.name;
+
+  openModal(detailModal);
 }
 
-/* ===== DELETE ===== */
 $('#detailDeleteBtn').addEventListener('click', () => {
   closeModal(detailModal);
   openModal(confirmModal);
@@ -319,15 +295,16 @@ $('#detailDeleteBtn').addEventListener('click', () => {
 $('#cancelDeleteBtn').addEventListener('click', () => closeModal(confirmModal));
 
 $('#confirmDeleteBtn').addEventListener('click', async () => {
+  if (!currentFile) return;
   try {
-    await fetch(`/api/files/${currentFileId}`, { method: 'DELETE' });
+    await supabase.storage.from(BUCKET).remove([currentFile.storage_path]);
+    await supabase.from('files').delete().eq('id', currentFile.id);
     closeModal(confirmModal);
     toast('Archivo eliminado', 'success');
     loadFiles();
   } catch (err) {
-    toast('Error al eliminar', 'error');
+    toast('Error al eliminar: ' + err.message, 'error');
   }
 });
 
-/* ===== INIT ===== */
 loadFiles();
