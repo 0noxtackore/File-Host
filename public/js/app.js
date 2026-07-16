@@ -98,7 +98,7 @@ async function showDetail(id){
   const isI=f.mimetype&&f.mimetype.startsWith('image/'),isV=f.mimetype&&f.mimetype.startsWith('video/'),isA=f.mimetype&&f.mimetype.startsWith('audio/');
   let mh='';if(isI)mh=`<img class="detail-img" src="${url}" alt="${esc(f.name)}" loading="eager">`;else if(isV)mh=`<video class="detail-img" src="${url}" controls></video>`;else if(isA)mh=`<audio style="width:100%;margin-bottom:1rem;border-radius:var(--radius-sm);" src="${url}" controls></audio>`;
   $('#detailBody').innerHTML=`${mh}<div class="detail-info"><div class="detail-info-row"><span class="label">Nombre</span><span class="value">${esc(f.name)}</span></div><div class="detail-info-row"><span class="label">Tipo</span><span class="value">${f.mimetype||'N/A'}</span></div><div class="detail-info-row"><span class="label">Tamaño</span><span class="value">${formatSize(f.size)}</span></div><div class="detail-info-row"><span class="label">Subido</span><span class="value">${formatDate(f.created_at)}</span></div></div>`;
-  $('#detailDownload').href=url;$('#detailDownload').download=f.name;
+  $('#detailDownload').href='#';$('#detailDownload').onclick=async e=>{e.preventDefault();if(!currentFile)return;toast('Descargando...','info');const url=getFileUrl(currentFile.storage_path);try{const r=await fetch(url);const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=currentFile.name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href)}catch(err){window.open(url,'_blank')}};
   openModal(detailModal);
 }
 
