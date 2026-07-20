@@ -7,14 +7,21 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL,
-    original_name TEXT NOT NULL,
-    mimetype TEXT NOT NULL,
-    size INTEGER NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
+  CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE SET NULL
   )
 `);
+
+const columns = db.prepare("PRAGMA table_info(files)").all().map(c => c.name);
+if (!columns.includes('folder_id')) {
+  db.exec(`ALTER TABLE files ADD COLUMN folder_id TEXT`);
+}
+if (!columns.includes('custom_name')) {
+  db.exec(`ALTER TABLE files ADD COLUMN custom_name TEXT`);
+}
 
 module.exports = db;

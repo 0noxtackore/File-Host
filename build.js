@@ -36,8 +36,10 @@ async function build() {
     fs.writeFileSync(file.path, file.contents);
   }
 
-  // Copy favicon
+  // Copy static files
   fs.copyFileSync(path.join(SRC, 'favicon.svg'), path.join(DIST, 'favicon.svg'));
+  fs.copyFileSync(path.join(SRC, 'sw.js'), path.join(DIST, 'sw.js'));
+  fs.copyFileSync(path.join(SRC, 'manifest.json'), path.join(DIST, 'manifest.json'));
 
   // Build HTML — replace asset references with minified versions
   let html = fs.readFileSync(path.join(SRC, 'index.html'), 'utf8');

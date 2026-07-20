@@ -1,8 +1,8 @@
-const CACHE='fh-v2';
+const CACHE='fh-v4';
 const PRECACHE=['/','/index.html','/css/style.css','/js/app.js','/favicon.svg','/manifest.json'];
 
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(PRECACHE)));self.skipWaiting()});
-self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim()});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))));self.clients.claim()});
 self.addEventListener('fetch',e=>{
   const u=e.request.url;
   if(u.includes('supabase.co')&&!u.includes('/storage/'))return;
