@@ -156,6 +156,14 @@ $('#batchDownloadBtn').addEventListener('click',async()=>{
   if(files.length===1){return downloadSingleFile(files[0]);}
   toast('Preparando descarga...','info');
   try{
+    if(!window.JSZip){
+      await new Promise((resolve,reject)=>{
+        const s=document.createElement('script');
+        s.src='https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js';
+        s.onload=resolve;s.onerror=()=>reject(new Error('No se pudo cargar JSZip'));
+        document.head.appendChild(s);
+      });
+    }
     const zip=new JSZip();
     await Promise.all(files.map(async f=>{
       const url=getFileUrl(f.storage_path);
