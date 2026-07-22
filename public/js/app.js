@@ -156,8 +156,7 @@ $('#batchDownloadBtn').addEventListener('click',async()=>{
   if(files.length===1){return downloadSingleFile(files[0]);}
   toast('Preparando descarga...','info');
   try{
-    const{data:jszip}=await import('https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js');
-    const zip=new jszip();
+    const zip=new JSZip();
     await Promise.all(files.map(async f=>{
       const url=getFileUrl(f.storage_path);
       const resp=await fetch(url);
