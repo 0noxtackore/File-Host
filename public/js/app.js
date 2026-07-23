@@ -128,9 +128,21 @@ function renderSelectionBar(){
   if(count===0){selectionBar.style.display='none';return;}
   selectionBar.style.display='flex';
   selectionCount.textContent=`${count} seleccionado${count>1?'s':''}`;
+  const allVisible=allFiles.map(f=>String(f.id));
+  const allSelected=allVisible.length>0&&allVisible.every(id=>selectedIds.has(id));
+  const btn=$('#selectAllBtn');
+  if(btn)btn.innerHTML=allSelected?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Deseleccionar':'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,11 12,14 22,4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Seleccionar todo';
 }
 
 $('#clearSelectionBtn').addEventListener('click',()=>{selectedIds.clear();gallery.querySelectorAll('.card.selected').forEach(c=>c.classList.remove('selected'));renderSelectionBar();});
+
+$('#selectAllBtn').addEventListener('click',()=>{
+  const allVisible=allFiles.map(f=>String(f.id));
+  const allSelected=allVisible.every(id=>selectedIds.has(id));
+  if(allSelected){selectedIds.clear();gallery.querySelectorAll('.card.selected').forEach(c=>c.classList.remove('selected'));}
+  else{allVisible.forEach(id=>selectedIds.add(id));gallery.querySelectorAll('.card:not(.folder-card)').forEach(c=>{if(selectedIds.has(c.dataset.id))c.classList.add('selected')});}
+  renderSelectionBar();
+});
 
 $('#batchDeleteBtn').addEventListener('click',async()=>{
   if(!selectedIds.size)return;
