@@ -177,16 +177,20 @@ $('#batchDownloadBtn').addEventListener('click',async()=>{
       });
     }
     const zip=new JSZip();
+    let failed=0;
     await Promise.all(files.map(async f=>{
-      const url=getFileUrl(f.storage_path);
-      const resp=await fetch(url);
-      const blob=await resp.blob();
-      zip.file(f.name,blob);
+      try{
+        const{data,error}=await db.storage.from(BUCKET).download(f.storage_path);
+        if(error){failed++;return;}
+        zip.file(f.name,data);
+      }catch(e){failed++;}
     }));
+    if(Object.keys(zip.files).length===0){toast('No se pudieron descargar los archivos','error');return;}
     const content=await zip.generateAsync({type:'blob'});
     const a=document.createElement('a');a.href=URL.createObjectURL(content);
     a.download=`archivos_${Date.now()}.zip`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
-    toast('Descarga iniciada','success');
+    if(failed>0)toast(`${files.length-failed} archivo(s) descargados, ${failed} fallaron`,'info');
+    else toast(`${files.length} archivo(s) descargados`,'success');
   }catch(err){toast('Error al descargar: '+err.message,'error');}
 });
 
@@ -359,9 +363,13 @@ async function showDetail(id){
 async function downloadSingleFile(f){
   if(!f)return;
   toast('Descargando...','info');
-  const url=getFileUrl(f.storage_path);
-  try{const r=await fetch(url);const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=f.name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href)}
-  catch(err){window.open(url,'_blank')}
+  try{
+    const{data,error}=await db.storage.from(BUCKET).download(f.storage_path);
+    if(error)throw error;
+    const a=document.createElement('a');a.href=URL.createObjectURL(data);
+    a.download=f.name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
+    toast('Descargado','success');
+  }catch(err){toast('Error al descargar: '+err.message,'error')}
 }
 
 $('#detailDeleteBtn').addEventListener('click',()=>{closeModal(detailModal);$('#confirmTitle').textContent='Eliminar archivo';$('#confirmMessage').textContent='Esta acción no se puede deshacer.';openModal(confirmModal);$('#confirmDeleteBtn').onclick=deleteCurrentFile;});
