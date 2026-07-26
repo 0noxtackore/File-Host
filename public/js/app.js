@@ -277,8 +277,8 @@ function addFiles(fl){for(const f of fl)if(!selectedFiles.find(s=>s.name===f.nam
 
 function renderPreview(){filePreview.innerHTML=selectedFiles.map((f,i)=>`<div class="tag">${f.name.length>28?f.name.substring(0,28)+'…':f.name}<span class="remove-tag" data-idx="${i}">&times;</span></div>`).join('');filePreview.querySelectorAll('.remove-tag').forEach(el=>{el.addEventListener('click',e=>{e.stopPropagation();selectedFiles.splice(parseInt(el.dataset.idx),1);renderPreview()})})}
 
-async function compressImage(f,maxW=1200,q=0.75){return new Promise(r=>{const img=new Image(),u=URL.createObjectURL(f);img.onload=()=>{URL.revokeObjectURL(u);let w=img.width,h=img.height;if(w>maxW){h=(maxW/w)*h;w=maxW}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);c.toBlob(b=>{r(new File([b],f.name,{type:'image/jpeg'}))},'image/jpeg',q)};img.src=u})}
-async function prepareFile(f){if(f.type.startsWith('image/')&&f.size>100000){toast(`Comprimiendo ${f.name}...`,'info');return await compressImage(f)}return f}
+async function compressImage(f,maxW=1200,q=0.80){return new Promise(r=>{const img=new Image(),u=URL.createObjectURL(f);img.onload=()=>{URL.revokeObjectURL(u);let w=img.width,h=img.height;if(w>maxW){h=(maxW/w)*h;w=maxW}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);c.toBlob(b=>{const name=f.name.replace(/\.[^.]+$/,'')+'.webp';r(new File([b],name,{type:'image/webp'}))},'image/webp',q)};img.src=u})}
+async function prepareFile(f){if(f.type.startsWith('image/')&&!f.type.startsWith('image/webp')){toast(`Convirtiendo ${f.name} a WebP...`,'info');return await compressImage(f)}return f}
 
 uploadForm.addEventListener('submit',async e=>{
   e.preventDefault();
