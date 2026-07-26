@@ -501,6 +501,23 @@ main {
   color: var(--danger);
 }
 
+/* ===== DRAG & DROP ===== */
+.card.dragging {
+  opacity: 0.4;
+  transform: scale(0.95);
+}
+
+.card.folder-card.drag-over {
+  border-color: var(--success);
+  box-shadow: 0 0 20px rgba(34,197,94,0.3);
+  background: rgba(34,197,94,0.05);
+}
+
+.card.folder-card.drag-over .icon-placeholder {
+  transform: scale(1.2);
+  color: var(--success) !important;
+}
+
 /* Card checkbox */
 .card-checkbox {
   position: absolute;

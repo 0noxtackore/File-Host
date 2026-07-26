@@ -92,6 +92,15 @@ function getFolderPath(folderId){
   return chain;
 }
 
+function isDescendant(parentId,childId){
+  let current=allFolders.find(f=>f.id===childId);
+  while(current){
+    if(current.id===parentId)return true;
+    current=current.parent_id?allFolders.find(f=>f.id===current.parent_id):null;
+  }
+  return false;
+}
+
 function slugify(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
 
 function navigateToFolder(id,updateUrl=true){
@@ -370,7 +379,7 @@ function renderGallery(files){
   stats.textContent=parts.join(' · ');
   let html='';
   visibleFolders.forEach((f,i)=>{
-    html+=`<div class="card folder-card" data-folder-id="${f.id}" style="animation-delay:${i*0.04}s"><div class="folder-actions"><button class="folder-menu-btn" data-folder-id="${f.id}" data-folder-name="${esc(f.name)}"><i class="bi bi-three-dots-vertical"></i></button></div><div class="card-preview"><div class="icon-placeholder"><i class="bi bi-folder-fill"></i></div></div><div class="card-info"><h3 title="${esc(f.name)}">${esc(f.name)}</h3><div class="meta"><span>Carpeta</span></div></div></div>`;
+    html+=`<div class="card folder-card" draggable="true" data-folder-id="${f.id}" style="animation-delay:${i*0.04}s"><div class="folder-actions"><button class="folder-menu-btn" data-folder-id="${f.id}" data-folder-name="${esc(f.name)}"><i class="bi bi-three-dots-vertical"></i></button></div><div class="card-preview"><div class="icon-placeholder"><i class="bi bi-folder-fill"></i></div></div><div class="card-info"><h3 title="${esc(f.name)}">${esc(f.name)}</h3><div class="meta"><span>Carpeta</span></div></div></div>`;
   });
   filteredFiles.forEach((f,i)=>{
     const displayName=getDisplayName(f);
@@ -391,7 +400,7 @@ function renderGallery(files){
     else if(isPpt)preview=`<div class="doc-icon-card doc-ppt"><i class="bi bi-file-earmark-ppt"></i></div>`;
     else if(isAud)preview=`<div class="icon-placeholder audio-icon"><i class="bi bi-music-note-beamed"></i></div>`;
     else preview=`<div class="icon-placeholder">${getFileIcon(f.mimetype,f.name)}</div>`;
-    html+=`<div class="card${isSelected?' selected':''}" data-id="${f.id}" style="animation-delay:${(visibleFolders.length+i)*0.04}s"><div class="card-checkbox" data-id="${f.id}"></div><div class="card-preview"><span class="card-type-badge">${getExtension(f.name)}</span>${preview}</div><div class="card-info"><h3 title="${esc(displayName)}">${esc(displayName)}</h3><div class="meta"><span>${formatSize(f.size)}</span><span>${formatDate(f.created_at)}</span></div></div></div>`;
+    html+=`<div class="card${isSelected?' selected':''}" draggable="true" data-id="${f.id}" style="animation-delay:${(visibleFolders.length+i)*0.04}s"><div class="card-checkbox" data-id="${f.id}"></div><div class="card-preview"><span class="card-type-badge">${getExtension(f.name)}</span>${preview}</div><div class="card-info"><h3 title="${esc(displayName)}">${esc(displayName)}</h3><div class="meta"><span>${formatSize(f.size)}</span><span>${formatDate(f.created_at)}</span></div></div></div>`;
   });
   gallery.innerHTML=html;
   gallery.querySelectorAll('.card.folder-card').forEach(c=>{
@@ -418,6 +427,60 @@ function renderGallery(files){
     cb.addEventListener('click',e=>{
       e.stopPropagation();
       toggleSelect(cb.dataset.id,e);
+    });
+  });
+
+  // Drag & Drop
+  let draggedType=null,draggedId=null;
+
+  gallery.querySelectorAll('.card[draggable]').forEach(card=>{
+    card.addEventListener('dragstart',e=>{
+      if(card.classList.contains('folder-card')){
+        draggedType='folder';draggedId=card.dataset.folderId;
+      }else{
+        draggedType='file';draggedId=card.dataset.id;
+      }
+      e.dataTransfer.effectAllowed='move';
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend',()=>{
+      card.classList.remove('dragging');
+      gallery.querySelectorAll('.drag-over').forEach(c=>c.classList.remove('drag-over'));
+      draggedType=null;draggedId=null;
+    });
+  });
+
+  gallery.querySelectorAll('.card.folder-card').forEach(folder=>{
+    folder.addEventListener('dragover',e=>{
+      e.preventDefault();
+      if(draggedType==='file'||(draggedType==='folder'&&folder.dataset.folderId!==draggedId)){
+        e.dataTransfer.dropEffect='move';
+        folder.classList.add('drag-over');
+      }
+    });
+    folder.addEventListener('dragleave',()=>folder.classList.remove('drag-over'));
+    folder.addEventListener('drop',async e=>{
+      e.preventDefault();
+      folder.classList.remove('drag-over');
+      if(!draggedId)return;
+      const targetFolderId=folder.dataset.folderId;
+      if(draggedType==='file'){
+        try{
+          const{error}=await db.from('files').update({folder_id:targetFolderId}).eq('id',draggedId);
+          if(error)throw error;
+          toast('Archivo movido','success');loadFiles();
+        }catch(err){toast('Error: '+err.message,'error')}
+      }else if(draggedType==='folder'&&draggedId!==targetFolderId){
+        if(isDescendant(draggedId,targetFolderId)){
+          toast('No puedes mover una carpeta dentro de sí misma','error');return;
+        }
+        try{
+          const{error}=await db.from('folders').update({parent_id:targetFolderId}).eq('id',draggedId);
+          if(error)throw error;
+          toast('Carpeta movida','success');
+          await loadFolders();updateFolderSelect();loadFiles();
+        }catch(err){toast('Error: '+err.message,'error')}
+      }
     });
   });
 }
