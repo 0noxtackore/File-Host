@@ -317,7 +317,7 @@ function getDisplayName(f){return f.custom_name||f.name;}
 
 function renderGallery(files){
   const hs=searchInput.value.trim().length>0;
-  if(!allFiles.length&&!allFolders.filter(f=>(f.parent_id||null)===(currentFolder||null)).length&&!hs){gallery.innerHTML='';empty.style.display='block';noResults.style.display='none';stats.textContent='';breadcrumb.innerHTML='';return}
+  if(!allFiles.length&&!allFolders.filter(f=>(f.parent_id||null)===(currentFolder||null)).length&&!hs){gallery.innerHTML='';empty.style.display='block';noResults.style.display='none';stats.textContent='';return}
   empty.style.display='none';
   const filteredFiles=files||allFiles;
   const visibleFolders=allFolders.filter(f=>(f.parent_id||null)===(currentFolder||null));
