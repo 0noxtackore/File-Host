@@ -3,7 +3,7 @@ const SUPABASE_KEY='sb_publishable_zs0n2Xm3WrWg2YcE7SulmA_VMPU7WVT';
 const BUCKET='files';
 
 let db,selectedFiles=[],currentFile=null,allFiles=[],allFolders=[],currentFolder=null,viewMode='grid';
-let selectedIds=new Set(),moveTargetFolder=null,moveFileIds=[];
+let selectedIds=new Set(),moveTargetFolder=null,moveFileIds=[],currentFolderAction=null;
 const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
 
 function initSupabase(){db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);loadContent();}
@@ -98,10 +98,68 @@ function updateFolderSelect(){
   folderSelect.innerHTML=opts.map(o=>`<option value="${o.id||''}">${esc(o.name)}</option>`).join('');
 }
 
+function showFolderMenu(btn,fid,fname){
+  closeFolderMenu();
+  const menu=document.createElement('div');
+  menu.className='folder-dropdown';
+  menu.innerHTML=`<div class="folder-dropdown-item" data-action="rename"><i class="bi bi-pencil"></i> Renombrar</div><div class="folder-dropdown-item folder-dropdown-danger" data-action="delete"><i class="bi bi-trash"></i> Eliminar</div>`;
+  document.body.appendChild(menu);
+  const r=btn.getBoundingClientRect();
+  menu.style.top=r.bottom+4+'px';
+  menu.style.left=Math.min(r.left,window.innerWidth-180)+'px';
+  menu.querySelectorAll('.folder-dropdown-item').forEach(item=>{
+    item.addEventListener('click',e=>{
+      e.stopPropagation();
+      closeFolderMenu();
+      if(item.dataset.action==='rename')openFolderRename(fid,fname);
+      if(item.dataset.action==='delete')confirmDeleteFolder(fid,fname);
+    });
+  });
+  setTimeout(()=>document.addEventListener('click',closeFolderMenu,{once:true}),0);
+}
+function closeFolderMenu(){document.querySelectorAll('.folder-dropdown').forEach(m=>m.remove())}
+
+function openFolderRename(fid,fname){
+  currentFolderAction=fid;
+  renameInput.value=fname;
+  renameForm.onsubmit=async e=>{
+    e.preventDefault();
+    const newName=renameInput.value.trim();
+    if(!newName)return toast('Escribe un nombre','error');
+    if(newName===fname){closeModal(renameModal);return;}
+    const exists=allFolders.some(f=>f.name.toLowerCase()===newName.toLowerCase()&&f.id!==fid&&(f.parent_id||null)===(currentFolder||null));
+    if(exists)return toast('Ya existe una carpeta con ese nombre','error');
+    try{
+      const{error}=await db.from('folders').update({name:newName}).eq('id',fid);
+      if(error)throw error;
+      closeModal(renameModal);toast('Carpeta renombrada','success');
+      await loadFolders();updateFolderSelect();loadFiles();
+    }catch(err){toast('Error: '+err.message,'error')}
+  };
+  openModal(renameModal);
+  setTimeout(()=>{renameInput.focus();renameInput.select()},100);
+}
+
+function confirmDeleteFolder(fid,fname){
+  $('#confirmTitle').textContent=`Eliminar carpeta "${fname}"`;
+  $('#confirmMessage').textContent='Los archivos dentro se moverán a la raíz. Esta acción no se puede deshacer.';
+  openModal(confirmModal);
+  $('#confirmDeleteBtn').onclick=async()=>{
+    try{
+      const{error}=await db.from('folders').delete().eq('id',fid);
+      if(error)throw error;
+      closeModal(confirmModal);toast('Carpeta eliminada','success');
+      await loadFolders();updateFolderSelect();loadFiles();
+    }catch(err){toast('Error: '+err.message,'error')}
+  };
+}
+
 newFolderForm.addEventListener('submit',async e=>{
   e.preventDefault();
   const name=folderNameInput.value.trim();
   if(!name)return toast('Escribe un nombre','error');
+  const exists=allFolders.some(f=>f.name.toLowerCase()===name.toLowerCase()&&(f.parent_id||null)===(currentFolder||null));
+  if(exists)return toast('Ya existe una carpeta con ese nombre','error');
   try{
     const{data,error}=await db.from('folders').insert({name,parent_id:currentFolder}).select();
     if(error)throw error;
@@ -275,7 +333,7 @@ function renderGallery(files){
   stats.textContent=parts.join(' · ');
   let html='';
   visibleFolders.forEach((f,i)=>{
-    html+=`<div class="card folder-card" data-folder-id="${f.id}" style="animation-delay:${i*0.04}s"><div class="card-preview"><div class="icon-placeholder"><i class="bi bi-folder-fill"></i></div></div><div class="card-info"><h3 title="${esc(f.name)}">${esc(f.name)}</h3><div class="meta"><span>Carpeta</span></div></div></div>`;
+    html+=`<div class="card folder-card" data-folder-id="${f.id}" style="animation-delay:${i*0.04}s"><div class="folder-actions"><button class="folder-menu-btn" data-folder-id="${f.id}" data-folder-name="${esc(f.name)}"><i class="bi bi-three-dots-vertical"></i></button></div><div class="card-preview"><div class="icon-placeholder"><i class="bi bi-folder-fill"></i></div></div><div class="card-info"><h3 title="${esc(f.name)}">${esc(f.name)}</h3><div class="meta"><span>Carpeta</span></div></div></div>`;
   });
   filteredFiles.forEach((f,i)=>{
     const displayName=getDisplayName(f);
@@ -300,7 +358,18 @@ function renderGallery(files){
   });
   gallery.innerHTML=html;
   gallery.querySelectorAll('.card.folder-card').forEach(c=>{
-    c.addEventListener('click',()=>navigateToFolder(c.dataset.folderId));
+    c.addEventListener('click',e=>{
+      if(e.target.closest('.folder-menu-btn'))return;
+      navigateToFolder(c.dataset.folderId);
+    });
+  });
+  gallery.querySelectorAll('.folder-menu-btn').forEach(btn=>{
+    btn.addEventListener('click',e=>{
+      e.stopPropagation();
+      const fid=btn.dataset.folderId;
+      const fname=btn.dataset.folderName;
+      showFolderMenu(btn,fid,fname);
+    });
   });
   gallery.querySelectorAll('.card:not(.folder-card)').forEach(c=>{
     c.addEventListener('click',e=>{

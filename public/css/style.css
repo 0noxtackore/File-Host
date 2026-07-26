@@ -436,6 +436,71 @@ main {
   border-color: var(--primary-light);
 }
 
+.folder-actions {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.card.folder-card:hover .folder-actions { opacity: 1; }
+
+.folder-menu-btn {
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+  border: none;
+  color: var(--text-secondary);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.folder-menu-btn:hover {
+  background: var(--primary);
+  color: white;
+}
+
+.folder-dropdown {
+  position: fixed;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem;
+  z-index: 250;
+  box-shadow: var(--shadow-lg);
+  animation: modalIn 0.15s ease;
+  min-width: 160px;
+}
+
+.folder-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  font-size: 0.83rem;
+  color: var(--text-secondary);
+  transition: all var(--transition);
+}
+
+.folder-dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.folder-dropdown-danger:hover {
+  background: rgba(239,68,68,0.1);
+  color: var(--danger);
+}
+
 /* Card checkbox */
 .card-checkbox {
   position: absolute;
