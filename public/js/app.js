@@ -40,7 +40,15 @@ async function loadFolders(){
 
 async function loadContent(){
   await loadFolders();
+  const urlFolder=resolveFolderFromUrl();
+  if(urlFolder){
+    currentFolder=urlFolder;
+    renderBreadcrumb();
+  }
   await loadFiles();
+  if(urlFolder){
+    history.replaceState({folderId:urlFolder},'',window.location.pathname);
+  }
 }
 
 async function loadFiles(){
@@ -84,12 +92,41 @@ function getFolderPath(folderId){
   return chain;
 }
 
-function navigateToFolder(id){
+function slugify(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
+
+function navigateToFolder(id,updateUrl=true){
   currentFolder=id||null;
   selectedIds.clear();
   renderSelectionBar();
   renderBreadcrumb();
   loadFiles();
+  if(updateUrl){
+    if(id){
+      const chain=getFolderPath(id);
+      const path='/'+chain.map(f=>slugify(f.name)).join('/');
+      history.pushState({folderId:id},'',path);
+    }else{
+      history.pushState({folderId:null},'', '/');
+    }
+  }
+}
+
+window.addEventListener('popstate',e=>{
+  const id=e.state?.folderId??null;
+  navigateToFolder(id,false);
+});
+
+function resolveFolderFromUrl(){
+  const path=window.location.pathname;
+  if(path==='/')return null;
+  const segments=path.split('/').filter(Boolean);
+  let parentId=null;
+  for(const seg of segments){
+    const match=allFolders.find(f=>slugify(f.name)===seg&&(f.parent_id||null)===(parentId||null));
+    if(!match)return null;
+    parentId=match.id;
+  }
+  return parentId;
 }
 
 function updateFolderSelect(){
