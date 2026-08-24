@@ -40,7 +40,8 @@ function loadServiceAccount() {
 
 async function main() {
   admin.initializeApp({
-    credential: admin.credential.cert(loadServiceAccount()),
+    credential: admin.cert(loadServiceAccount()),
+    databaseURL: 'https://file-host-d3a49-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: BUCKET,
   });
   const db = admin.firestore();
