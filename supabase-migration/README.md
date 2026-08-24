@@ -34,6 +34,16 @@ scripts to push that data into Firebase.
    It is safe to re-run: Firestore docs are keyed by their original IDs and
    Storage uploads overwrite.
 
+### Migration modes (environment variables)
+
+- Default: imports the DB rows into Firestore **and** uploads the binary files
+  to Firebase Storage.
+- `SKIP_STORAGE=1`: imports only the Firestore metadata, no Storage upload.
+- `BASE64=1`: embeds each file as a base64 data URL **inside the Firestore
+  document** (no Storage used). Because Firestore caps documents at ~1 MB,
+  only files up to ~700 KB are embedded; larger files are stored as metadata
+  with `data_skipped: true`. The app shows embedded base64 automatically.
+
 ## After migrating
 
 Deploy the security rules (see `firestore.rules` and `storage.rules` at the

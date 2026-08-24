@@ -59,11 +59,14 @@ async function main() {
   }
   console.log(`  ✓ folders`);
 
-  // --- Files (metadata) ---
+  // --- Files (metadata, optional base64 embedding) ---
   const files = JSON.parse(fs.readFileSync(path.join(DB_DIR, 'files.json'), 'utf8'));
+  const base64Mode = process.env.BASE64 === '1';
+  const EMBED_LIMIT = 700 * 1024; // raw bytes; base64 adds ~33%, stay under Firestore's 1MB/doc limit
   console.log(`Importing ${files.length} file record(s)...`);
+  let embedded = 0, skippedBig = 0;
   for (const f of files) {
-    await db.collection('files').doc(String(f.id)).set({
+    const doc = {
       name: f.name,
       mimetype: f.mimetype,
       size: f.size,
@@ -71,11 +74,30 @@ async function main() {
       folder_id: f.folder_id || null,
       custom_name: f.custom_name || null,
       created_at: f.created_at || new Date().toISOString(),
-    });
+    };
+    if (base64Mode) {
+      const local = path.join(FILES_DIR, f.storage_path);
+      if (!fs.existsSync(local)) {
+        console.warn(`  ⚠ missing local file, skipping data: ${f.storage_path}`);
+      } else if (f.size <= EMBED_LIMIT) {
+        const b64 = fs.readFileSync(local).toString('base64');
+        doc.data = `data:${f.mimetype || 'application/octet-stream'};base64,${b64}`;
+        embedded++;
+      } else {
+        doc.data_skipped = true;
+        skippedBig++;
+        console.warn(`  ⚠ too large for Firestore (${f.size} bytes), skipped base64: ${f.storage_path}`);
+      }
+    }
+    await db.collection('files').doc(String(f.id)).set(doc);
   }
-  console.log(`  ✓ file records`);
+  console.log(`  ✓ file records (${embedded} embedded as base64${skippedBig ? `, ${skippedBig} too large to embed` : ''})`);
 
-  // --- File blobs (optional) ---
+  // --- Storage upload (only when not embedding base64) ---
+  if (base64Mode) {
+    console.log('Migration complete (base64 embedded in Firestore, no Storage used).');
+    process.exit(0);
+  }
   if (process.env.SKIP_STORAGE) {
     console.log('Skipping Storage upload (SKIP_STORAGE is set).');
     console.log('Migration complete (metadata only).');

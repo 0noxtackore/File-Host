@@ -331,7 +331,7 @@ $('#batchDownloadBtn').addEventListener('click', async () => {
     let failed = 0;
     await Promise.all(files.map(async f => {
       try {
-        const blob = await (await fetch(fileUrl(f.storage_path))).blob();
+        const blob = await (await fetch(getFileSrc(f))).blob();
         zip.file(f.name, blob);
       } catch (e) { failed++; }
     }));
@@ -455,8 +455,8 @@ function renderGallery(files) {
     const isExcel = (f.mimetype && f.mimetype.includes('spreadsheet')) || (f.mimetype && f.mimetype.includes('excel')) || /\.xlsx?$/i.test(f.name);
     const isPpt = (f.mimetype && f.mimetype.includes('presentation')) || /\.pptx?$/i.test(f.name);
     let preview = '';
-    if (isImg) preview = `<img src="${fileUrl(f.storage_path)}" alt="${esc(displayName)}" loading="lazy" decoding="async">`;
-    else if (isVid) preview = `<video src="${fileUrl(f.storage_path)}" muted preload="metadata" class="card-video"></video><div class="card-play-overlay"><i class="bi bi-play-fill"></i></div>`;
+    if (isImg) preview = `<img src="${getFileSrc(f)}" alt="${esc(displayName)}" loading="lazy" decoding="async">`;
+    else if (isVid) preview = `<video src="${getFileSrc(f)}" muted preload="metadata" class="card-video"></video><div class="card-play-overlay"><i class="bi bi-play-fill"></i></div>`;
     else if (isPdf) preview = `<div class="doc-icon-card doc-pdf"><i class="bi bi-file-earmark-pdf"></i></div>`;
     else if (isWord) preview = `<div class="doc-icon-card doc-word"><i class="bi bi-file-earmark-word"></i></div>`;
     else if (isExcel) preview = `<div class="doc-icon-card doc-excel"><i class="bi bi-file-earmark-excel"></i></div>`;
@@ -540,6 +540,8 @@ function renderGallery(files) {
 }
 
 function getFileUrl(p) { return fileUrl(p); }
+// Prefer an embedded base64 blob (Firestore) over the Storage URL.
+function getFileSrc(f) { return (f && f.data) ? f.data : fileUrl(f.storage_path); }
 
 $('#gridViewBtn').addEventListener('click', () => setView('grid'));
 $('#listViewBtn').addEventListener('click', () => setView('list'));
@@ -574,7 +576,7 @@ async function showDetail(id) {
   currentFile = f;
   const displayName = getDisplayName(f);
   $('#detailTitle').textContent = displayName;
-  const url = fileUrl(f.storage_path);
+  const url = getFileSrc(f);
   const isI = f.mimetype && f.mimetype.startsWith('image/'), isV = f.mimetype && f.mimetype.startsWith('video/'), isA = f.mimetype && f.mimetype.startsWith('audio/');
   let mh = ''; if (isI) mh = `<img class="detail-img" src="${url}" alt="${esc(displayName)}" loading="eager">`; else if (isV) mh = `<video class="detail-img" src="${url}" controls></video>`; else if (isA) mh = `<audio style="width:100%;margin-bottom:1rem;border-radius:var(--radius-sm);" src="${url}" controls></audio>`;
   const folderName = f.folder_id ? allFolders.find(fo => fo.id === f.folder_id)?.name || 'Otra' : 'Raíz';
@@ -587,6 +589,12 @@ async function downloadSingleFile(f) {
   if (!f) return;
   toast('Descargando...', 'info');
   try {
+    if (f.data) {
+      const a = document.createElement('a'); a.href = f.data; a.download = f.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast('Descargado', 'success');
+      return;
+    }
     const res = await fetch(fileUrl(f.storage_path));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
