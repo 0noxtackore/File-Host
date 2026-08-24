@@ -587,11 +587,17 @@ async function downloadSingleFile(f) {
   if (!f) return;
   toast('Descargando...', 'info');
   try {
-    const blob = await (await fetch(fileUrl(f.storage_path))).blob();
+    const res = await fetch(fileUrl(f.storage_path));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
     toast('Descargado', 'success');
-  } catch (err) { toast('Error al descargar: ' + err.message, 'error'); }
+  } catch (err) {
+    // Fallback: open the public URL in a new tab (works even if CORS isn't configured).
+    window.open(fileUrl(f.storage_path), '_blank');
+    toast('No se pudo descargar automáticamente, abriendo el archivo', 'info');
+  }
 }
 
 $('#detailDeleteBtn').addEventListener('click', () => { closeModal(detailModal); $('#confirmTitle').textContent = 'Eliminar archivo'; $('#confirmMessage').textContent = 'Esta acción no se puede deshacer.'; openModal(confirmModal); $('#confirmDeleteBtn').onclick = deleteCurrentFile; });
