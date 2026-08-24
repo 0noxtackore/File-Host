@@ -9,11 +9,13 @@ import {
   collection,
   doc,
   getDocs,
+  getDoc,
   setDoc,
   updateDoc,
   deleteDoc,
   query,
   where,
+  select,
   writeBatch,
 } from 'firebase/firestore';
 import {
@@ -78,9 +80,21 @@ export async function removeFolder(id) {
 
 // === FILES (Firestore collection: "files") ===
 
+// Gallery listing: lightweight — excludes the heavy base64 `data` field so the
+// initial load stays fast. Use getFileFull() to fetch `data` on demand.
 export async function fetchFiles() {
-  const snap = await getDocs(collection(db, 'files'));
+  const q = query(
+    collection(db, 'files'),
+    select('name', 'mimetype', 'size', 'storage_path', 'folder_id', 'custom_name', 'created_at', 'data_skipped')
+  );
+  const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+// Full document including the embedded base64 `data` (used for preview/download).
+export async function getFileFull(id) {
+  const snap = await getDoc(doc(db, 'files', id));
+  return { id: snap.id, ...snap.data() };
 }
 
 export async function addFileRecord(data) {

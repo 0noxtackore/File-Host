@@ -7,11 +7,10 @@ import {
   moveFolder,
   removeFolder,
   fetchFiles,
+  getFileFull,
   addFileRecord,
   updateFileRecord,
   removeFileRecord,
-  uploadFile,
-  deleteStorageFile,
 } from './firebase.js';
 import {
   onAuthStateChanged,
@@ -305,8 +304,7 @@ $('#batchDeleteBtn').addEventListener('click', async () => {
     const ids = [...selectedIds];
     try {
       for (const id of ids) {
-        const f = allFiles.find(x => x.id === id);
-        if (f) { await deleteStorageFile(f.storage_path); await removeFileRecord(id); }
+        await removeFileRecord(id);
       }
       selectedIds.clear(); closeModal(confirmModal); toast(`${ids.length} archivo(s) eliminado(s)`, 'success'); loadFiles();
     } catch (err) { toast('Error: ' + err.message, 'error'); }
@@ -331,8 +329,12 @@ $('#batchDownloadBtn').addEventListener('click', async () => {
     let failed = 0;
     await Promise.all(files.map(async f => {
       try {
-        const blob = await (await fetch(getFileSrc(f))).blob();
-        zip.file(f.name, blob);
+        let full = f;
+        if (!f.data) { try { full = await getFileFull(f.id); } catch (e) { full = f; } }
+        let blob;
+        if (full.data) { blob = await (await fetch(full.data)).blob(); }
+        else { blob = await (await fetch(fileUrl(full.storage_path))).blob(); }
+        zip.file(full.name, blob);
       } catch (e) { failed++; }
     }));
     if (Object.keys(zip.files).length === 0) { toast('No se pudieron descargar los archivos', 'error'); return; }
@@ -388,19 +390,34 @@ async function prepareFile(f) {
   return f;
 }
 
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
 uploadForm.addEventListener('submit', async e => {
   e.preventDefault();
   if (!selectedFiles.length) return toast('Selecciona al menos un archivo', 'error');
   const sb = $('#submitBtn'), pg = $('#uploadProgress'), pf = $('#progressFill'), pp = $('#progressPercent');
   sb.disabled = true; pg.style.display = 'block';
-  const tot = selectedFiles.length; let dn = 0;
+  const tot = selectedFiles.length; let dn = 0, ok = 0;
+  const EMBED_LIMIT = 700 * 1024; // Firestore ~1MB/doc cap (base64 adds ~33%)
   const customName = customNameInput.value.trim() || null;
   const targetFolder = folderSelect.value || null;
   try {
     for (const file of selectedFiles) {
       const ready = await prepareFile(file);
       const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${ready.name}`;
-      await uploadFile(path, ready);
+      if (ready.size > EMBED_LIMIT) {
+        toast(`"${file.name}" supera el límite de Firestore (~700 KB) y no se subió`, 'error');
+        dn++; const pct = Math.round((dn / tot) * 100); pf.style.width = pct + '%'; pp.textContent = pct + '%';
+        continue;
+      }
+      const dataUrl = await fileToDataUrl(ready);
       const displayName = customName && tot === 1 ? customName : file.name;
       await addFileRecord({
         name: file.name,
@@ -409,10 +426,11 @@ uploadForm.addEventListener('submit', async e => {
         storage_path: path,
         folder_id: targetFolder,
         custom_name: customName && tot === 1 ? customName : null,
+        data: dataUrl,
       });
-      dn++; const pct = Math.round((dn / tot) * 100); pf.style.width = pct + '%'; pp.textContent = pct + '%';
+      ok++; dn++; const pct = Math.round((dn / tot) * 100); pf.style.width = pct + '%'; pp.textContent = pct + '%';
     }
-    closeModal(uploadModal); toast(`${dn} archivo(s) subido(s)`, 'success'); loadFiles();
+    closeModal(uploadModal); toast(`${ok} archivo(s) subido(s)`, 'success'); loadFiles();
   } catch (err) { toast('Error: ' + err.message, 'error'); }
   finally { sb.disabled = false; pg.style.display = 'none'; pf.style.width = '0%'; }
 });
@@ -455,8 +473,8 @@ function renderGallery(files) {
     const isExcel = (f.mimetype && f.mimetype.includes('spreadsheet')) || (f.mimetype && f.mimetype.includes('excel')) || /\.xlsx?$/i.test(f.name);
     const isPpt = (f.mimetype && f.mimetype.includes('presentation')) || /\.pptx?$/i.test(f.name);
     let preview = '';
-    if (isImg) preview = `<img src="${getFileSrc(f)}" alt="${esc(displayName)}" loading="lazy" decoding="async">`;
-    else if (isVid) preview = `<video src="${getFileSrc(f)}" muted preload="metadata" class="card-video"></video><div class="card-play-overlay"><i class="bi bi-play-fill"></i></div>`;
+    if (isImg) preview = `<div class="icon-placeholder"><i class="bi bi-image"></i></div>`;
+    else if (isVid) preview = `<div class="icon-placeholder"><i class="bi bi-play-circle"></i></div>`;
     else if (isPdf) preview = `<div class="doc-icon-card doc-pdf"><i class="bi bi-file-earmark-pdf"></i></div>`;
     else if (isWord) preview = `<div class="doc-icon-card doc-word"><i class="bi bi-file-earmark-word"></i></div>`;
     else if (isExcel) preview = `<div class="doc-icon-card doc-excel"><i class="bi bi-file-earmark-excel"></i></div>`;
@@ -572,7 +590,9 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s; re
 // === DETAIL ===
 
 async function showDetail(id) {
-  const f = allFiles.find(x => x.id == id); if (!f) return;
+  const base = allFiles.find(x => x.id == id); if (!base) return;
+  let f = base;
+  try { f = await getFileFull(id); } catch (e) { /* fall back to lightweight metadata */ }
   currentFile = f;
   const displayName = getDisplayName(f);
   $('#detailTitle').textContent = displayName;
@@ -587,23 +607,25 @@ async function showDetail(id) {
 
 async function downloadSingleFile(f) {
   if (!f) return;
+  // Ensure we have the embedded base64 (gallery list excludes it).
+  let full = f;
+  if (!f.data) { try { full = await getFileFull(f.id); } catch (e) { full = f; } }
   toast('Descargando...', 'info');
   try {
-    if (f.data) {
-      const a = document.createElement('a'); a.href = f.data; a.download = f.name;
+    if (full.data) {
+      const a = document.createElement('a'); a.href = full.data; a.download = full.name;
       document.body.appendChild(a); a.click(); a.remove();
       toast('Descargado', 'success');
       return;
     }
-    const res = await fetch(fileUrl(f.storage_path));
+    const res = await fetch(fileUrl(full.storage_path));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    a.download = full.name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
     toast('Descargado', 'success');
   } catch (err) {
-    // Fallback: open the public URL in a new tab (works even if CORS isn't configured).
-    window.open(fileUrl(f.storage_path), '_blank');
+    window.open(fileUrl(full.storage_path), '_blank');
     toast('No se pudo descargar automáticamente, abriendo el archivo', 'info');
   }
 }
@@ -613,7 +635,7 @@ $('#cancelDeleteBtn').addEventListener('click', () => closeModal(confirmModal));
 
 async function deleteCurrentFile() {
   if (!currentFile) return;
-  try { await deleteStorageFile(currentFile.storage_path); await removeFileRecord(currentFile.id); closeModal(confirmModal); toast('Archivo eliminado', 'success'); loadFiles(); }
+  try { await removeFileRecord(currentFile.id); closeModal(confirmModal); toast('Archivo eliminado', 'success'); loadFiles(); }
   catch (err) { toast('Error: ' + err.message, 'error'); }
 }
 
