@@ -75,7 +75,13 @@ async function main() {
   }
   console.log(`  ✓ file records`);
 
-  // --- File blobs ->
+  // --- File blobs (optional) ---
+  if (process.env.SKIP_STORAGE) {
+    console.log('Skipping Storage upload (SKIP_STORAGE is set).');
+    console.log('Migration complete (metadata only).');
+    process.exit(0);
+  }
+
   console.log(`Uploading ${files.length} file(s) to Storage...`);
   let ok = 0;
   for (const f of files) {
