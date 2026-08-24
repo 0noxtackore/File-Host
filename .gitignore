@@ -3,3 +3,6 @@ uploads/
 filehost.db
 dist/
 .env
+supabase-migration/files/
+supabase-migration/db/
+supabase-migration/serviceAccount.json

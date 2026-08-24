@@ -1,632 +1,683 @@
-const SUPABASE_URL='https://qxgmhfugoxzzqblztuvq.supabase.co';
-const SUPABASE_KEY='sb_publishable_zs0n2Xm3WrWg2YcE7SulmA_VMPU7WVT';
-const BUCKET='files';
+import {
+  auth,
+  fileUrl,
+  fetchFolders,
+  createFolder,
+  renameFolder,
+  moveFolder,
+  removeFolder,
+  fetchFiles,
+  addFileRecord,
+  updateFileRecord,
+  removeFileRecord,
+  uploadFile,
+  deleteStorageFile,
+} from './firebase.js';
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInAnonymously,
+  signOut,
+} from 'firebase/auth';
 
-let db,selectedFiles=[],currentFile=null,allFiles=[],allFolders=[],currentFolder=null,viewMode='grid';
-let selectedIds=new Set(),moveTargetFolder=null,moveFileIds=[],currentFolderAction=null;
-const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
+let selectedFiles = [], currentFile = null, allFiles = [], allFolders = [], currentFolder = null, viewMode = 'grid';
+let selectedIds = new Set(), moveTargetFolder = null, moveFileIds = [], currentFolderAction = null;
+const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
 
-function initSupabase(){db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);loadContent();}
+function initAuth() {
+  const overlay = $('#authOverlay');
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      overlay.style.display = 'none';
+      loadContent();
+    } else {
+      overlay.style.display = 'flex';
+    }
+  });
 
-const uploadModal=$('#uploadModal'),detailModal=$('#detailModal'),confirmModal=$('#confirmModal'),
-  newFolderModal=$('#newFolderModal'),renameModal=$('#renameModal'),moveModal=$('#moveModal'),
-  gallery=$('#gallery'),empty=$('#empty'),noResults=$('#noResults'),stats=$('#stats'),
-  fileInput=$('#fileInput'),dropZone=$('#dropZone'),filePreview=$('#filePreview'),
-  uploadForm=$('#uploadForm'),searchInput=$('#searchInput'),breadcrumb=$('#breadcrumb'),
-  selectionBar=$('#selectionBar'),selectionCount=$('#selectionCount'),
-  folderNameInput=$('#folderNameInput'),newFolderForm=$('#newFolderForm'),
-  renameInput=$('#renameInput'),renameForm=$('#renameForm'),
-  moveTree=$('#moveTree'),moveConfirmBtn=$('#moveConfirmBtn'),moveCancelBtn=$('#moveCancelBtn'),
-  folderSelect=$('#folderSelect'),customNameInput=$('#customNameInput');
+  const email = $('#authEmail'), pass = $('#authPass');
 
-function toast(m,t='info'){const i={success:'✓',error:'✕',info:'ℹ'},c=$('#toastContainer'),e=document.createElement('div');e.className=`toast ${t}`;e.innerHTML=`<span class="toast-icon">${i[t]}</span><span class="toast-msg">${m}</span>`;c.appendChild(e);setTimeout(()=>{e.classList.add('removing');setTimeout(()=>e.remove(),300)},3000)}
-function openModal(m){m.classList.add('active')}
-function closeModal(m){m.classList.remove('active')}
-function closeAll(){[uploadModal,detailModal,confirmModal,newFolderModal,renameModal,moveModal].forEach(m=>closeModal(m))}
+  $('#loginBtn').addEventListener('click', async () => {
+    try { await signInWithEmailAndPassword(auth, email.value.trim(), pass.value); }
+    catch (e) { toast('Error: ' + e.message, 'error'); }
+  });
+  $('#registerBtn').addEventListener('click', async () => {
+    try { await createUserWithEmailAndPassword(auth, email.value.trim(), pass.value); }
+    catch (e) { toast('Error: ' + e.message, 'error'); }
+  });
+  $('#guestBtn').addEventListener('click', async () => {
+    try { await signInAnonymously(auth); }
+    catch (e) { toast('Error: ' + e.message, 'error'); }
+  });
+  $('#logoutBtn').addEventListener('click', () => signOut(auth));
+}
 
-$$('[data-close]').forEach(b=>b.addEventListener('click',closeAll));
-$$('.modal').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)closeModal(m)}));
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeAll()});
+const uploadModal = $('#uploadModal'), detailModal = $('#detailModal'), confirmModal = $('#confirmModal'),
+  newFolderModal = $('#newFolderModal'), renameModal = $('#renameModal'), moveModal = $('#moveModal'),
+  gallery = $('#gallery'), empty = $('#empty'), noResults = $('#noResults'), stats = $('#stats'),
+  fileInput = $('#fileInput'), dropZone = $('#dropZone'), filePreview = $('#filePreview'),
+  uploadForm = $('#uploadForm'), searchInput = $('#searchInput'), breadcrumb = $('#breadcrumb'),
+  selectionBar = $('#selectionBar'), selectionCount = $('#selectionCount'),
+  folderNameInput = $('#folderNameInput'), newFolderForm = $('#newFolderForm'),
+  renameInput = $('#renameInput'), renameForm = $('#renameForm'),
+  moveTree = $('#moveTree'), moveConfirmBtn = $('#moveConfirmBtn'), moveCancelBtn = $('#moveCancelBtn'),
+  folderSelect = $('#folderSelect'), customNameInput = $('#customNameInput');
+
+function toast(m, t = 'info') {
+  const i = { success: '✓', error: '✕', info: 'ℹ' }, c = $('#toastContainer'), e = document.createElement('div');
+  e.className = `toast ${t}`; e.innerHTML = `<span class="toast-icon">${i[t]}</span><span class="toast-msg">${m}</span>`;
+  c.appendChild(e); setTimeout(() => { e.classList.add('removing'); setTimeout(() => e.remove(), 300); }, 3000);
+}
+function openModal(m) { m.classList.add('active'); }
+function closeModal(m) { m.classList.remove('active'); }
+function closeAll() { [uploadModal, detailModal, confirmModal, newFolderModal, renameModal, moveModal].forEach(m => closeModal(m)); }
+
+$$('[data-close]').forEach(b => b.addEventListener('click', closeAll));
+$$('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModal(m); }));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
 
 // === FOLDERS ===
 
-async function loadFolders(){
-  try{
-    const{data,error}=await db.from('folders').select('*').order('name',{ascending:true});
-    if(error)throw error;
-    allFolders=data||[];
-  }catch(err){allFolders=[];}
+async function loadFolders() {
+  try {
+    allFolders = await fetchFolders();
+  } catch (err) {
+    toast('Error al cargar carpetas: ' + err.message, 'error');
+    allFolders = [];
+  }
 }
 
-async function loadContent(){
+async function loadContent() {
   await loadFolders();
-  const urlFolder=resolveFolderFromUrl();
-  if(urlFolder){
-    currentFolder=urlFolder;
+  const urlFolder = resolveFolderFromUrl();
+  if (urlFolder) {
+    currentFolder = urlFolder;
     renderBreadcrumb();
   }
   await loadFiles();
-  if(urlFolder){
-    history.replaceState({folderId:urlFolder},'',window.location.pathname);
+  if (urlFolder) {
+    history.replaceState({ folderId: urlFolder }, '', window.location.pathname);
   }
 }
 
-async function loadFiles(){
-  try{
-    const folderFilter=currentFolder?currentFolder:'';
-    let q=db.from('files').select('*').order('created_at',{ascending:false});
-    if(currentFolder){q=q.eq('folder_id',currentFolder);}
-    else{q=q.is('folder_id',null);}
-    const{data,error}=await q;
-    if(error)throw error;allFiles=data||[];renderGallery(allFiles);
-  }catch(err){gallery.innerHTML='<p style="color:var(--danger)">Error: '+err.message+'</p>'}
+async function loadFiles() {
+  try {
+    const all = await fetchFiles();
+    const cf = currentFolder || null;
+    allFiles = all.filter(f => (f.folder_id || null) === cf);
+    renderGallery(allFiles);
+  } catch (err) {
+    gallery.innerHTML = '<p style="color:var(--danger)">Error: ' + err.message + '</p>';
+  }
 }
 
-function renderBreadcrumb(){
-  if(!currentFolder){breadcrumb.innerHTML='';return;}
-  const chain=getFolderPath(currentFolder);
-  let html=`<button class="breadcrumb-back" id="breadcrumbBack"><i class="bi bi-arrow-left"></i></button>`;
-  html+=`<span class="breadcrumb-item${chain.length===0?' current':''}" data-folder=""><i class="bi bi-house-fill"></i> Raíz</span>`;
-  chain.forEach((f,i)=>{
-    const isLast=i===chain.length-1;
-    html+=`<span class="breadcrumb-sep">›</span>`;
-    html+=`<span class="breadcrumb-item${isLast?' current':''}" data-folder="${f.id}">${esc(f.name)}</span>`;
+function renderBreadcrumb() {
+  if (!currentFolder) { breadcrumb.innerHTML = ''; return; }
+  const chain = getFolderPath(currentFolder);
+  let html = `<button class="breadcrumb-back" id="breadcrumbBack"><i class="bi bi-arrow-left"></i></button>`;
+  html += `<span class="breadcrumb-item${chain.length === 0 ? ' current' : ''}" data-folder=""><i class="bi bi-house-fill"></i> Raíz</span>`;
+  chain.forEach((f, i) => {
+    const isLast = i === chain.length - 1;
+    html += `<span class="breadcrumb-sep">›</span>`;
+    html += `<span class="breadcrumb-item${isLast ? ' current' : ''}" data-folder="${f.id}">${esc(f.name)}</span>`;
   });
-  breadcrumb.innerHTML=html;
-  $('#breadcrumbBack').addEventListener('click',()=>{
-    const parentId=chain.length>1?chain[chain.length-2].id:null;
+  breadcrumb.innerHTML = html;
+  $('#breadcrumbBack').addEventListener('click', () => {
+    const parentId = chain.length > 1 ? chain[chain.length - 2].id : null;
     navigateToFolder(parentId);
   });
-  breadcrumb.querySelectorAll('.breadcrumb-item:not(.current)').forEach(el=>{
-    el.addEventListener('click',()=>navigateToFolder(el.dataset.folder||null));
+  breadcrumb.querySelectorAll('.breadcrumb-item:not(.current)').forEach(el => {
+    el.addEventListener('click', () => navigateToFolder(el.dataset.folder || null));
   });
 }
 
-function getFolderPath(folderId){
-  const chain=[];
-  let current=allFolders.find(f=>f.id===folderId);
-  while(current){
+function getFolderPath(folderId) {
+  const chain = [];
+  let current = allFolders.find(f => f.id === folderId);
+  while (current) {
     chain.unshift(current);
-    current=current.parent_id?allFolders.find(f=>f.id===current.parent_id):null;
+    current = current.parent_id ? allFolders.find(f => f.id === current.parent_id) : null;
   }
   return chain;
 }
 
-function isDescendant(parentId,childId){
-  let current=allFolders.find(f=>f.id===childId);
-  while(current){
-    if(current.id===parentId)return true;
-    current=current.parent_id?allFolders.find(f=>f.id===current.parent_id):null;
+function isDescendant(parentId, childId) {
+  let current = allFolders.find(f => f.id === childId);
+  while (current) {
+    if (current.id === parentId) return true;
+    current = current.parent_id ? allFolders.find(f => f.id === current.parent_id) : null;
   }
   return false;
 }
 
-function slugify(s){return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
+function slugify(s) { return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
 
-function navigateToFolder(id,updateUrl=true){
-  currentFolder=id||null;
+function navigateToFolder(id, updateUrl = true) {
+  currentFolder = id || null;
   selectedIds.clear();
   renderSelectionBar();
   renderBreadcrumb();
   loadFiles();
-  if(updateUrl){
-    if(id){
-      const chain=getFolderPath(id);
-      const path='/'+chain.map(f=>slugify(f.name)).join('/');
-      history.pushState({folderId:id},'',path);
-    }else{
-      history.pushState({folderId:null},'', '/');
+  if (updateUrl) {
+    if (id) {
+      const chain = getFolderPath(id);
+      const path = '/' + chain.map(f => slugify(f.name)).join('/');
+      history.pushState({ folderId: id }, '', path);
+    } else {
+      history.pushState({ folderId: null }, '', '/');
     }
   }
 }
 
-window.addEventListener('popstate',e=>{
-  const id=e.state?.folderId??null;
-  navigateToFolder(id,false);
+window.addEventListener('popstate', e => {
+  const id = e.state?.folderId ?? null;
+  navigateToFolder(id, false);
 });
 
-function resolveFolderFromUrl(){
-  const path=window.location.pathname;
-  if(path==='/')return null;
-  const segments=path.split('/').filter(Boolean);
-  let parentId=null;
-  for(const seg of segments){
-    const match=allFolders.find(f=>slugify(f.name)===seg&&(f.parent_id||null)===(parentId||null));
-    if(!match)return null;
-    parentId=match.id;
+function resolveFolderFromUrl() {
+  const path = window.location.pathname;
+  if (path === '/') return null;
+  const segments = path.split('/').filter(Boolean);
+  let parentId = null;
+  for (const seg of segments) {
+    const match = allFolders.find(f => slugify(f.name) === seg && (f.parent_id || null) === (parentId || null));
+    if (!match) return null;
+    parentId = match.id;
   }
   return parentId;
 }
 
-function updateFolderSelect(){
-  const opts=[{id:null,name:'Carpeta raíz'}];
-  allFolders.forEach(f=>opts.push({id:f.id,name:f.name}));
-  folderSelect.innerHTML=opts.map(o=>`<option value="${o.id||''}">${esc(o.name)}</option>`).join('');
+function updateFolderSelect() {
+  const opts = [{ id: null, name: 'Carpeta raíz' }];
+  allFolders.forEach(f => opts.push({ id: f.id, name: f.name }));
+  folderSelect.innerHTML = opts.map(o => `<option value="${o.id || ''}">${esc(o.name)}</option>`).join('');
 }
 
-function showFolderMenu(btn,fid,fname){
+function showFolderMenu(btn, fid, fname) {
   closeFolderMenu();
-  const menu=document.createElement('div');
-  menu.className='folder-dropdown';
-  menu.innerHTML=`<div class="folder-dropdown-item" data-action="rename"><i class="bi bi-pencil"></i> Renombrar</div><div class="folder-dropdown-item folder-dropdown-danger" data-action="delete"><i class="bi bi-trash"></i> Eliminar</div>`;
+  const menu = document.createElement('div');
+  menu.className = 'folder-dropdown';
+  menu.innerHTML = `<div class="folder-dropdown-item" data-action="rename"><i class="bi bi-pencil"></i> Renombrar</div><div class="folder-dropdown-item folder-dropdown-danger" data-action="delete"><i class="bi bi-trash"></i> Eliminar</div>`;
   document.body.appendChild(menu);
-  const r=btn.getBoundingClientRect();
-  menu.style.top=r.bottom+4+'px';
-  menu.style.left=Math.min(r.left,window.innerWidth-180)+'px';
-  menu.querySelectorAll('.folder-dropdown-item').forEach(item=>{
-    item.addEventListener('click',e=>{
+  const r = btn.getBoundingClientRect();
+  menu.style.top = r.bottom + 4 + 'px';
+  menu.style.left = Math.min(r.left, window.innerWidth - 180) + 'px';
+  menu.querySelectorAll('.folder-dropdown-item').forEach(item => {
+    item.addEventListener('click', e => {
       e.stopPropagation();
       closeFolderMenu();
-      if(item.dataset.action==='rename')openFolderRename(fid,fname);
-      if(item.dataset.action==='delete')confirmDeleteFolder(fid,fname);
+      if (item.dataset.action === 'rename') openFolderRename(fid, fname);
+      if (item.dataset.action === 'delete') confirmDeleteFolder(fid, fname);
     });
   });
-  setTimeout(()=>document.addEventListener('click',closeFolderMenu,{once:true}),0);
+  setTimeout(() => document.addEventListener('click', closeFolderMenu, { once: true }), 0);
 }
-function closeFolderMenu(){document.querySelectorAll('.folder-dropdown').forEach(m=>m.remove())}
+function closeFolderMenu() { document.querySelectorAll('.folder-dropdown').forEach(m => m.remove()); }
 
-function openFolderRename(fid,fname){
-  currentFolderAction=fid;
-  renameInput.value=fname;
-  renameForm.onsubmit=async e=>{
+function openFolderRename(fid, fname) {
+  currentFolderAction = fid;
+  renameInput.value = fname;
+  renameForm.onsubmit = async e => {
     e.preventDefault();
-    const newName=renameInput.value.trim();
-    if(!newName)return toast('Escribe un nombre','error');
-    if(newName===fname){closeModal(renameModal);return;}
-    const exists=allFolders.some(f=>f.name.toLowerCase()===newName.toLowerCase()&&f.id!==fid&&(f.parent_id||null)===(currentFolder||null));
-    if(exists)return toast('Ya existe una carpeta con ese nombre','error');
-    try{
-      const{error}=await db.from('folders').update({name:newName}).eq('id',fid);
-      if(error)throw error;
-      closeModal(renameModal);toast('Carpeta renombrada','success');
-      await loadFolders();updateFolderSelect();loadFiles();
-    }catch(err){toast('Error: '+err.message,'error')}
+    const newName = renameInput.value.trim();
+    if (!newName) return toast('Escribe un nombre', 'error');
+    if (newName === fname) { closeModal(renameModal); return; }
+    const exists = allFolders.some(f => f.name.toLowerCase() === newName.toLowerCase() && f.id !== fid && (f.parent_id || null) === (currentFolder || null));
+    if (exists) return toast('Ya existe una carpeta con ese nombre', 'error');
+    try {
+      await renameFolder(fid, newName);
+      closeModal(renameModal); toast('Carpeta renombrada', 'success');
+      await loadFolders(); updateFolderSelect(); loadFiles();
+    } catch (err) { toast('Error: ' + err.message, 'error'); }
   };
   openModal(renameModal);
-  setTimeout(()=>{renameInput.focus();renameInput.select()},100);
+  setTimeout(() => { renameInput.focus(); renameInput.select(); }, 100);
 }
 
-function confirmDeleteFolder(fid,fname){
-  $('#confirmTitle').textContent=`Eliminar carpeta "${fname}"`;
-  $('#confirmMessage').textContent='Los archivos dentro se moverán a la raíz. Esta acción no se puede deshacer.';
+function confirmDeleteFolder(fid, fname) {
+  $('#confirmTitle').textContent = `Eliminar carpeta "${fname}"`;
+  $('#confirmMessage').textContent = 'Los archivos dentro se moverán a la raíz. Esta acción no se puede deshacer.';
   openModal(confirmModal);
-  $('#confirmDeleteBtn').onclick=async()=>{
-    try{
-      const{error}=await db.from('folders').delete().eq('id',fid);
-      if(error)throw error;
-      closeModal(confirmModal);toast('Carpeta eliminada','success');
-      await loadFolders();updateFolderSelect();loadFiles();
-    }catch(err){toast('Error: '+err.message,'error')}
+  $('#confirmDeleteBtn').onclick = async () => {
+    try {
+      await removeFolder(fid);
+      closeModal(confirmModal); toast('Carpeta eliminada', 'success');
+      await loadFolders(); updateFolderSelect(); loadFiles();
+    } catch (err) { toast('Error: ' + err.message, 'error'); }
   };
 }
 
-newFolderForm.addEventListener('submit',async e=>{
+newFolderForm.addEventListener('submit', async e => {
   e.preventDefault();
-  const name=folderNameInput.value.trim();
-  if(!name)return toast('Escribe un nombre','error');
-  const exists=allFolders.some(f=>f.name.toLowerCase()===name.toLowerCase()&&(f.parent_id||null)===(currentFolder||null));
-  if(exists)return toast('Ya existe una carpeta con ese nombre','error');
-  try{
-    const{data,error}=await db.from('folders').insert({name,parent_id:currentFolder}).select();
-    if(error)throw error;
-    closeModal(newFolderModal);folderNameInput.value='';
-    toast('Carpeta creada','success');
-    await loadFolders();updateFolderSelect();loadFiles();
-  }catch(err){toast('Error: '+err.message,'error')}
+  const name = folderNameInput.value.trim();
+  if (!name) return toast('Escribe un nombre', 'error');
+  const exists = allFolders.some(f => f.name.toLowerCase() === name.toLowerCase() && (f.parent_id || null) === (currentFolder || null));
+  if (exists) return toast('Ya existe una carpeta con ese nombre', 'error');
+  try {
+    await createFolder({ name, parent_id: currentFolder });
+    closeModal(newFolderModal); folderNameInput.value = '';
+    toast('Carpeta creada', 'success');
+    await loadFolders(); updateFolderSelect(); loadFiles();
+  } catch (err) { toast('Error: ' + err.message, 'error'); }
 });
 
-$('#newFolderBtn').addEventListener('click',()=>{openModal(newFolderModal);folderNameInput.value='';setTimeout(()=>folderNameInput.focus(),100);});
+$('#newFolderBtn').addEventListener('click', () => { openModal(newFolderModal); folderNameInput.value = ''; setTimeout(() => folderNameInput.focus(), 100); });
 
 // === SELECTION ===
 
-function toggleSelect(id,e){
-  if(e){e.stopPropagation();}
-  if(selectedIds.has(id)){selectedIds.delete(id);}else{selectedIds.add(id);}
-  const card=gallery.querySelector(`.card[data-id="${id}"]`);
-  if(card)card.classList.toggle('selected',selectedIds.has(id));
+function toggleSelect(id, e) {
+  if (e) { e.stopPropagation(); }
+  if (selectedIds.has(id)) { selectedIds.delete(id); } else { selectedIds.add(id); }
+  const card = gallery.querySelector(`.card[data-id="${id}"]`);
+  if (card) card.classList.toggle('selected', selectedIds.has(id));
   renderSelectionBar();
 }
 
-function renderSelectionBar(){
-  const count=selectedIds.size;
-  if(count===0){selectionBar.style.display='none';return;}
-  selectionBar.style.display='flex';
-  selectionCount.textContent=`${count} seleccionado${count>1?'s':''}`;
-  const allVisible=allFiles.map(f=>String(f.id));
-  const allSelected=allVisible.length>0&&allVisible.every(id=>selectedIds.has(id));
-  const btn=$('#selectAllBtn');
-  if(btn)btn.innerHTML=allSelected?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Deseleccionar':'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,11 12,14 22,4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Seleccionar todo';
+function renderSelectionBar() {
+  const count = selectedIds.size;
+  if (count === 0) { selectionBar.style.display = 'none'; return; }
+  selectionBar.style.display = 'flex';
+  selectionCount.textContent = `${count} seleccionado${count > 1 ? 's' : ''}`;
+  const allVisible = allFiles.map(f => String(f.id));
+  const allSelected = allVisible.length > 0 && allVisible.every(id => selectedIds.has(id));
+  const btn = $('#selectAllBtn');
+  if (btn) btn.innerHTML = allSelected ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Deseleccionar' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,11 12,14 22,4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> Seleccionar todo';
 }
 
-$('#clearSelectionBtn').addEventListener('click',()=>{selectedIds.clear();gallery.querySelectorAll('.card.selected').forEach(c=>c.classList.remove('selected'));renderSelectionBar();});
+$('#clearSelectionBtn').addEventListener('click', () => { selectedIds.clear(); gallery.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected')); renderSelectionBar(); });
 
-$('#selectAllBtn').addEventListener('click',()=>{
-  const allVisible=allFiles.map(f=>String(f.id));
-  const allSelected=allVisible.every(id=>selectedIds.has(id));
-  if(allSelected){selectedIds.clear();gallery.querySelectorAll('.card.selected').forEach(c=>c.classList.remove('selected'));}
-  else{allVisible.forEach(id=>selectedIds.add(id));gallery.querySelectorAll('.card:not(.folder-card)').forEach(c=>{if(selectedIds.has(c.dataset.id))c.classList.add('selected')});}
+$('#selectAllBtn').addEventListener('click', () => {
+  const allVisible = allFiles.map(f => String(f.id));
+  const allSelected = allVisible.every(id => selectedIds.has(id));
+  if (allSelected) { selectedIds.clear(); gallery.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected')); }
+  else { allVisible.forEach(id => selectedIds.add(id)); gallery.querySelectorAll('.card:not(.folder-card)').forEach(c => { if (selectedIds.has(c.dataset.id)) c.classList.add('selected'); }); }
   renderSelectionBar();
 });
 
-$('#batchDeleteBtn').addEventListener('click',async()=>{
-  if(!selectedIds.size)return;
-  const count=selectedIds.size;
-  $('#confirmTitle').textContent=`Eliminar ${count} archivo(s)`;
-  $('#confirmMessage').textContent='Esta acción no se puede deshacer.';
+$('#batchDeleteBtn').addEventListener('click', async () => {
+  if (!selectedIds.size) return;
+  const count = selectedIds.size;
+  $('#confirmTitle').textContent = `Eliminar ${count} archivo(s)`;
+  $('#confirmMessage').textContent = 'Esta acción no se puede deshacer.';
   openModal(confirmModal);
-  $('#confirmDeleteBtn').onclick=async()=>{
-    const ids=[...selectedIds];
-    try{
-      for(const id of ids){
-        const f=allFiles.find(x=>x.id===id);
-        if(f){await db.storage.from(BUCKET).remove([f.storage_path]);await db.from('files').delete().eq('id',id);}
+  $('#confirmDeleteBtn').onclick = async () => {
+    const ids = [...selectedIds];
+    try {
+      for (const id of ids) {
+        const f = allFiles.find(x => x.id === id);
+        if (f) { await deleteStorageFile(f.storage_path); await removeFileRecord(id); }
       }
-      selectedIds.clear();closeModal(confirmModal);toast(`${ids.length} archivo(s) eliminado(s)`,'success');loadFiles();
-    }catch(err){toast('Error: '+err.message,'error')}
+      selectedIds.clear(); closeModal(confirmModal); toast(`${ids.length} archivo(s) eliminado(s)`, 'success'); loadFiles();
+    } catch (err) { toast('Error: ' + err.message, 'error'); }
   };
 });
 
-$('#batchDownloadBtn').addEventListener('click',async()=>{
-  if(!selectedIds.size)return;
-  const files=allFiles.filter(f=>selectedIds.has(f.id));
-  if(files.length===1){return downloadSingleFile(files[0]);}
-  toast('Preparando descarga...','info');
-  try{
-    if(!window.JSZip){
-      await new Promise((resolve,reject)=>{
-        const s=document.createElement('script');
-        s.src='https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js';
-        s.onload=resolve;s.onerror=()=>reject(new Error('No se pudo cargar JSZip'));
+$('#batchDownloadBtn').addEventListener('click', async () => {
+  if (!selectedIds.size) return;
+  const files = allFiles.filter(f => selectedIds.has(f.id));
+  if (files.length === 1) { return downloadSingleFile(files[0]); }
+  toast('Preparando descarga...', 'info');
+  try {
+    if (!window.JSZip) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js';
+        s.onload = resolve; s.onerror = () => reject(new Error('No se pudo cargar JSZip'));
         document.head.appendChild(s);
       });
     }
-    const zip=new JSZip();
-    let failed=0;
-    await Promise.all(files.map(async f=>{
-      try{
-        const{data,error}=await db.storage.from(BUCKET).download(f.storage_path);
-        if(error){failed++;return;}
-        zip.file(f.name,data);
-      }catch(e){failed++;}
+    const zip = new JSZip();
+    let failed = 0;
+    await Promise.all(files.map(async f => {
+      try {
+        const blob = await (await fetch(fileUrl(f.storage_path))).blob();
+        zip.file(f.name, blob);
+      } catch (e) { failed++; }
     }));
-    if(Object.keys(zip.files).length===0){toast('No se pudieron descargar los archivos','error');return;}
-    const content=await zip.generateAsync({type:'blob'});
-    const a=document.createElement('a');a.href=URL.createObjectURL(content);
-    a.download=`archivos_${Date.now()}.zip`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
-    if(failed>0)toast(`${files.length-failed} archivo(s) descargados, ${failed} fallaron`,'info');
-    else toast(`${files.length} archivo(s) descargados`,'success');
-  }catch(err){toast('Error al descargar: '+err.message,'error');}
+    if (Object.keys(zip.files).length === 0) { toast('No se pudieron descargar los archivos', 'error'); return; }
+    const content = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(content);
+    a.download = `archivos_${Date.now()}.zip`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    if (failed > 0) toast(`${files.length - failed} archivo(s) descargados, ${failed} fallaron`, 'info');
+    else toast(`${files.length} archivo(s) descargados`, 'success');
+  } catch (err) { toast('Error al descargar: ' + err.message, 'error'); }
 });
 
-$('#batchMoveBtn').addEventListener('click',()=>{
-  moveFileIds=[...selectedIds];
+$('#batchMoveBtn').addEventListener('click', () => {
+  moveFileIds = [...selectedIds];
   openMoveModal();
 });
 
 // === UPLOAD ===
 
-$('#uploadBtn').addEventListener('click',()=>{
-  selectedFiles=[];filePreview.innerHTML='';fileInput.value='';
-  customNameInput.value='';$('#uploadProgress').style.display='none';
+$('#uploadBtn').addEventListener('click', () => {
+  selectedFiles = []; filePreview.innerHTML = ''; fileInput.value = '';
+  customNameInput.value = ''; $('#uploadProgress').style.display = 'none';
   updateFolderSelect();
-  folderSelect.value=currentFolder||'';
+  folderSelect.value = currentFolder || '';
   openModal(uploadModal);
 });
 
-dropZone.addEventListener('click',()=>fileInput.click());
-dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('dragover')});
-dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('dragover');addFiles(e.dataTransfer.files)});
-fileInput.addEventListener('change',()=>addFiles(fileInput.files));
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); addFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', () => addFiles(fileInput.files));
 
-function addFiles(fl){for(const f of fl)if(!selectedFiles.find(s=>s.name===f.name&&s.size===f.size))selectedFiles.push(f);renderPreview()}
+function addFiles(fl) { for (const f of fl) if (!selectedFiles.find(s => s.name === f.name && s.size === f.size)) selectedFiles.push(f); renderPreview(); }
 
-function renderPreview(){filePreview.innerHTML=selectedFiles.map((f,i)=>`<div class="tag">${f.name.length>28?f.name.substring(0,28)+'…':f.name}<span class="remove-tag" data-idx="${i}">&times;</span></div>`).join('');filePreview.querySelectorAll('.remove-tag').forEach(el=>{el.addEventListener('click',e=>{e.stopPropagation();selectedFiles.splice(parseInt(el.dataset.idx),1);renderPreview()})})}
+function renderPreview() { filePreview.innerHTML = selectedFiles.map((f, i) => `<div class="tag">${f.name.length > 28 ? f.name.substring(0, 28) + '…' : f.name}<span class="remove-tag" data-idx="${i}">&times;</span></div>`).join(''); filePreview.querySelectorAll('.remove-tag').forEach(el => { el.addEventListener('click', e => { e.stopPropagation(); selectedFiles.splice(parseInt(el.dataset.idx), 1); renderPreview(); }); }); }
 
-async function compressImage(f,maxW=1200,q=0.80){return new Promise(r=>{const img=new Image(),u=URL.createObjectURL(f);img.onload=()=>{URL.revokeObjectURL(u);let w=img.width,h=img.height;if(w>maxW){h=(maxW/w)*h;w=maxW}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);c.toBlob(b=>{const name=f.name.replace(/\.[^.]+$/,'')+'.webp';r(new File([b],name,{type:'image/webp'}))},'image/webp',q)};img.src=u})}
-async function prepareFile(f){if(f.type.startsWith('image/')&&!f.type.startsWith('image/webp')){toast(`Convirtiendo ${f.name} a WebP...`,'info');return await compressImage(f)}return f}
+async function compressImage(f, maxW = 1200, q = 0.80) {
+  return new Promise(r => {
+    const img = new Image(), u = URL.createObjectURL(f);
+    img.onload = () => {
+      URL.revokeObjectURL(u);
+      let w = img.width, h = img.height;
+      if (w > maxW) { h = (maxW / w) * h; w = maxW; }
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      c.toBlob(b => { const name = f.name.replace(/\.[^.]+$/, '') + '.webp'; r(new File([b], name, { type: 'image/webp' })); }, 'image/webp', q);
+    };
+    img.src = u;
+  });
+}
+async function prepareFile(f) {
+  if (f.type.startsWith('image/') && !f.type.startsWith('image/webp')) { toast(`Convirtiendo ${f.name} a WebP...`, 'info'); return await compressImage(f); }
+  return f;
+}
 
-uploadForm.addEventListener('submit',async e=>{
+uploadForm.addEventListener('submit', async e => {
   e.preventDefault();
-  if(!selectedFiles.length)return toast('Selecciona al menos un archivo','error');
-  const sb=$('#submitBtn'),pg=$('#uploadProgress'),pf=$('#progressFill'),pp=$('#progressPercent');
-  sb.disabled=true;pg.style.display='block';
-  const tot=selectedFiles.length;let dn=0;
-  const customName=customNameInput.value.trim()||null;
-  const targetFolder=folderSelect.value||null;
-  try{
-    for(const file of selectedFiles){
-      const ready=await prepareFile(file);
-      const path=`${Date.now()}_${Math.random().toString(36).slice(2)}_${ready.name}`;
-      const{error:ue}=await db.storage.from(BUCKET).upload(path,ready,{cacheControl:'31536000',upsert:false});
-      if(ue)throw ue;
-      const displayName=customName&&tot===1?customName:file.name;
-      const{error:de}=await db.from('files').insert({name:file.name,mimetype:file.type||'application/octet-stream',size:ready.size,storage_path:path,folder_id:targetFolder});
-      if(de)throw de;
-      if(customName&&tot===1){
-        const{data:recent}=await db.from('files').select('id').eq('storage_path',path).single();
-        if(recent){await db.from('files').update({custom_name:customName}).eq('id',recent.id);}
-      }
-      dn++;const pct=Math.round((dn/tot)*100);pf.style.width=pct+'%';pp.textContent=pct+'%';
+  if (!selectedFiles.length) return toast('Selecciona al menos un archivo', 'error');
+  const sb = $('#submitBtn'), pg = $('#uploadProgress'), pf = $('#progressFill'), pp = $('#progressPercent');
+  sb.disabled = true; pg.style.display = 'block';
+  const tot = selectedFiles.length; let dn = 0;
+  const customName = customNameInput.value.trim() || null;
+  const targetFolder = folderSelect.value || null;
+  try {
+    for (const file of selectedFiles) {
+      const ready = await prepareFile(file);
+      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${ready.name}`;
+      await uploadFile(path, ready);
+      const displayName = customName && tot === 1 ? customName : file.name;
+      await addFileRecord({
+        name: file.name,
+        mimetype: file.type || 'application/octet-stream',
+        size: ready.size,
+        storage_path: path,
+        folder_id: targetFolder,
+        custom_name: customName && tot === 1 ? customName : null,
+      });
+      dn++; const pct = Math.round((dn / tot) * 100); pf.style.width = pct + '%'; pp.textContent = pct + '%';
     }
-    closeModal(uploadModal);toast(`${dn} archivo(s) subido(s)`,'success');loadFiles();
-  }catch(err){toast('Error: '+err.message,'error')}
-  finally{sb.disabled=false;pg.style.display='none';pf.style.width='0%'}
+    closeModal(uploadModal); toast(`${dn} archivo(s) subido(s)`, 'success'); loadFiles();
+  } catch (err) { toast('Error: ' + err.message, 'error'); }
+  finally { sb.disabled = false; pg.style.display = 'none'; pf.style.width = '0%'; }
 });
 
 // === GALLERY ===
 
-searchInput.addEventListener('input',()=>renderGallery(getFilteredFiles()));
-function getFilteredFiles(){const q=searchInput.value.toLowerCase().trim();return q?allFiles.filter(f=>getDisplayName(f).toLowerCase().includes(q)):allFiles}
+searchInput.addEventListener('input', () => renderGallery(getFilteredFiles()));
+function getFilteredFiles() { const q = searchInput.value.toLowerCase().trim(); return q ? allFiles.filter(f => getDisplayName(f).toLowerCase().includes(q)) : allFiles; }
 
-function getDisplayName(f){return f.custom_name||f.name;}
+function getDisplayName(f) { return f.custom_name || f.name; }
 
-function renderGallery(files){
-  const hs=searchInput.value.trim().length>0;
-  if(!allFiles.length&&!allFolders.filter(f=>(f.parent_id||null)===(currentFolder||null)).length&&!hs){gallery.innerHTML='';empty.style.display='block';noResults.style.display='none';stats.textContent='';return}
-  empty.style.display='none';
-  const filteredFiles=files||allFiles;
-  const visibleFolders=allFolders.filter(f=>(f.parent_id||null)===(currentFolder||null));
-  const hasContent=filteredFiles.length>0||visibleFolders.length>0;
-  if(!hasContent&&!hs){gallery.innerHTML='';noResults.style.display='none';empty.style.display='block';stats.textContent='';return}
-  if(hs&&!filteredFiles.length){gallery.innerHTML='';noResults.style.display='block';stats.textContent='';return}
-  noResults.style.display='none';
-  const ts=filteredFiles.reduce((a,f)=>a+f.size,0);
-  const folderCount=visibleFolders.length;
-  const parts=[];
-  if(folderCount)parts.push(`${folderCount} carpeta(s)`);
-  if(filteredFiles.length)parts.push(`${filteredFiles.length} archivo(s) · ${formatSize(ts)}`);
-  stats.textContent=parts.join(' · ');
-  let html='';
-  visibleFolders.forEach((f,i)=>{
-    html+=`<div class="card folder-card" draggable="true" data-folder-id="${f.id}" style="animation-delay:${i*0.04}s"><div class="folder-actions"><button class="folder-menu-btn" data-folder-id="${f.id}" data-folder-name="${esc(f.name)}"><i class="bi bi-three-dots-vertical"></i></button></div><div class="card-preview"><div class="icon-placeholder"><i class="bi bi-folder-fill"></i></div></div><div class="card-info"><h3 title="${esc(f.name)}">${esc(f.name)}</h3><div class="meta"><span>Carpeta</span></div></div></div>`;
+function renderGallery(files) {
+  const hs = searchInput.value.trim().length > 0;
+  if (!allFiles.length && !allFolders.filter(f => (f.parent_id || null) === (currentFolder || null)).length && !hs) { gallery.innerHTML = ''; empty.style.display = 'block'; noResults.style.display = 'none'; stats.textContent = ''; return; }
+  empty.style.display = 'none';
+  const filteredFiles = files || allFiles;
+  const visibleFolders = allFolders.filter(f => (f.parent_id || null) === (currentFolder || null));
+  const hasContent = filteredFiles.length > 0 || visibleFolders.length > 0;
+  if (!hasContent && !hs) { gallery.innerHTML = ''; noResults.style.display = 'none'; empty.style.display = 'block'; stats.textContent = ''; return; }
+  if (hs && !filteredFiles.length) { gallery.innerHTML = ''; noResults.style.display = 'block'; stats.textContent = ''; return; }
+  noResults.style.display = 'none';
+  const ts = filteredFiles.reduce((a, f) => a + f.size, 0);
+  const folderCount = visibleFolders.length;
+  const parts = [];
+  if (folderCount) parts.push(`${folderCount} carpeta(s)`);
+  if (filteredFiles.length) parts.push(`${filteredFiles.length} archivo(s) · ${formatSize(ts)}`);
+  stats.textContent = parts.join(' · ');
+  let html = '';
+  visibleFolders.forEach((f, i) => {
+    html += `<div class="card folder-card" draggable="true" data-folder-id="${f.id}" style="animation-delay:${i * 0.04}s"><div class="folder-actions"><button class="folder-menu-btn" data-folder-id="${f.id}" data-folder-name="${esc(f.name)}"><i class="bi bi-three-dots-vertical"></i></button></div><div class="card-preview"><div class="icon-placeholder"><i class="bi bi-folder-fill"></i></div></div><div class="card-info"><h3 title="${esc(f.name)}">${esc(f.name)}</h3><div class="meta"><span>Carpeta</span></div></div></div>`;
   });
-  filteredFiles.forEach((f,i)=>{
-    const displayName=getDisplayName(f);
-    const isSelected=selectedIds.has(f.id);
-    const isImg=f.mimetype&&f.mimetype.startsWith('image/');
-    const isVid=f.mimetype&&f.mimetype.startsWith('video/');
-    const isAud=f.mimetype&&f.mimetype.startsWith('audio/');
-    const isPdf=f.mimetype==='application/pdf'||/\.pdf$/i.test(f.name);
-    const isWord=(f.mimetype&&f.mimetype.includes('word'))||/\.docx?$/i.test(f.name);
-    const isExcel=(f.mimetype&&f.mimetype.includes('spreadsheet'))||(f.mimetype&&f.mimetype.includes('excel'))||/\.xlsx?$/i.test(f.name);
-    const isPpt=(f.mimetype&&f.mimetype.includes('presentation'))||/\.pptx?$/i.test(f.name);
-    let preview='';
-    if(isImg)preview=`<img src="${getFileUrl(f.storage_path)}" alt="${esc(displayName)}" loading="lazy" decoding="async">`;
-    else if(isVid)preview=`<video src="${getFileUrl(f.storage_path)}" muted preload="metadata" class="card-video"></video><div class="card-play-overlay"><i class="bi bi-play-fill"></i></div>`;
-    else if(isPdf)preview=`<div class="doc-icon-card doc-pdf"><i class="bi bi-file-earmark-pdf"></i></div>`;
-    else if(isWord)preview=`<div class="doc-icon-card doc-word"><i class="bi bi-file-earmark-word"></i></div>`;
-    else if(isExcel)preview=`<div class="doc-icon-card doc-excel"><i class="bi bi-file-earmark-excel"></i></div>`;
-    else if(isPpt)preview=`<div class="doc-icon-card doc-ppt"><i class="bi bi-file-earmark-ppt"></i></div>`;
-    else if(isAud)preview=`<div class="icon-placeholder audio-icon"><i class="bi bi-music-note-beamed"></i></div>`;
-    else preview=`<div class="icon-placeholder">${getFileIcon(f.mimetype,f.name)}</div>`;
-    html+=`<div class="card${isSelected?' selected':''}" draggable="true" data-id="${f.id}" style="animation-delay:${(visibleFolders.length+i)*0.04}s"><div class="card-checkbox" data-id="${f.id}"></div><div class="card-preview"><span class="card-type-badge">${getExtension(f.name)}</span>${preview}</div><div class="card-info"><h3 title="${esc(displayName)}">${esc(displayName)}</h3><div class="meta"><span>${formatSize(f.size)}</span><span>${formatDate(f.created_at)}</span></div></div></div>`;
+  filteredFiles.forEach((f, i) => {
+    const displayName = getDisplayName(f);
+    const isSelected = selectedIds.has(f.id);
+    const isImg = f.mimetype && f.mimetype.startsWith('image/');
+    const isVid = f.mimetype && f.mimetype.startsWith('video/');
+    const isAud = f.mimetype && f.mimetype.startsWith('audio/');
+    const isPdf = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.name);
+    const isWord = (f.mimetype && f.mimetype.includes('word')) || /\.docx?$/i.test(f.name);
+    const isExcel = (f.mimetype && f.mimetype.includes('spreadsheet')) || (f.mimetype && f.mimetype.includes('excel')) || /\.xlsx?$/i.test(f.name);
+    const isPpt = (f.mimetype && f.mimetype.includes('presentation')) || /\.pptx?$/i.test(f.name);
+    let preview = '';
+    if (isImg) preview = `<img src="${fileUrl(f.storage_path)}" alt="${esc(displayName)}" loading="lazy" decoding="async">`;
+    else if (isVid) preview = `<video src="${fileUrl(f.storage_path)}" muted preload="metadata" class="card-video"></video><div class="card-play-overlay"><i class="bi bi-play-fill"></i></div>`;
+    else if (isPdf) preview = `<div class="doc-icon-card doc-pdf"><i class="bi bi-file-earmark-pdf"></i></div>`;
+    else if (isWord) preview = `<div class="doc-icon-card doc-word"><i class="bi bi-file-earmark-word"></i></div>`;
+    else if (isExcel) preview = `<div class="doc-icon-card doc-excel"><i class="bi bi-file-earmark-excel"></i></div>`;
+    else if (isPpt) preview = `<div class="doc-icon-card doc-ppt"><i class="bi bi-file-earmark-ppt"></i></div>`;
+    else if (isAud) preview = `<div class="icon-placeholder audio-icon"><i class="bi bi-music-note-beamed"></i></div>`;
+    else preview = `<div class="icon-placeholder">${getFileIcon(f.mimetype, f.name)}</div>`;
+    html += `<div class="card${isSelected ? ' selected' : ''}" draggable="true" data-id="${f.id}" style="animation-delay:${(visibleFolders.length + i) * 0.04}s"><div class="card-checkbox" data-id="${f.id}"></div><div class="card-preview"><span class="card-type-badge">${getExtension(f.name)}</span>${preview}</div><div class="card-info"><h3 title="${esc(displayName)}">${esc(displayName)}</h3><div class="meta"><span>${formatSize(f.size)}</span><span>${formatDate(f.created_at)}</span></div></div></div>`;
   });
-  gallery.innerHTML=html;
-  gallery.querySelectorAll('.card.folder-card').forEach(c=>{
-    c.addEventListener('click',e=>{
-      if(e.target.closest('.folder-menu-btn'))return;
+  gallery.innerHTML = html;
+  gallery.querySelectorAll('.card.folder-card').forEach(c => {
+    c.addEventListener('click', e => {
+      if (e.target.closest('.folder-menu-btn')) return;
       navigateToFolder(c.dataset.folderId);
     });
   });
-  gallery.querySelectorAll('.folder-menu-btn').forEach(btn=>{
-    btn.addEventListener('click',e=>{
+  gallery.querySelectorAll('.folder-menu-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
       e.stopPropagation();
-      const fid=btn.dataset.folderId;
-      const fname=btn.dataset.folderName;
-      showFolderMenu(btn,fid,fname);
+      showFolderMenu(btn, btn.dataset.folderId, btn.dataset.folderName);
     });
   });
-  gallery.querySelectorAll('.card:not(.folder-card)').forEach(c=>{
-    c.addEventListener('click',e=>{
-      if(e.target.closest('.card-checkbox'))return;
+  gallery.querySelectorAll('.card:not(.folder-card)').forEach(c => {
+    c.addEventListener('click', e => {
+      if (e.target.closest('.card-checkbox')) return;
       showDetail(c.dataset.id);
     });
   });
-  gallery.querySelectorAll('.card-checkbox').forEach(cb=>{
-    cb.addEventListener('click',e=>{
+  gallery.querySelectorAll('.card-checkbox').forEach(cb => {
+    cb.addEventListener('click', e => {
       e.stopPropagation();
-      toggleSelect(cb.dataset.id,e);
+      toggleSelect(cb.dataset.id, e);
     });
   });
 
   // Drag & Drop
-  let draggedType=null,draggedId=null;
+  let draggedType = null, draggedId = null;
 
-  gallery.querySelectorAll('.card[draggable]').forEach(card=>{
-    card.addEventListener('dragstart',e=>{
-      if(card.classList.contains('folder-card')){
-        draggedType='folder';draggedId=card.dataset.folderId;
-      }else{
-        draggedType='file';draggedId=card.dataset.id;
-      }
-      e.dataTransfer.effectAllowed='move';
+  gallery.querySelectorAll('.card[draggable]').forEach(card => {
+    card.addEventListener('dragstart', e => {
+      if (card.classList.contains('folder-card')) { draggedType = 'folder'; draggedId = card.dataset.folderId; }
+      else { draggedType = 'file'; draggedId = card.dataset.id; }
+      e.dataTransfer.effectAllowed = 'move';
       card.classList.add('dragging');
     });
-    card.addEventListener('dragend',()=>{
+    card.addEventListener('dragend', () => {
       card.classList.remove('dragging');
-      gallery.querySelectorAll('.drag-over').forEach(c=>c.classList.remove('drag-over'));
-      draggedType=null;draggedId=null;
+      gallery.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+      draggedType = null; draggedId = null;
     });
   });
 
-  gallery.querySelectorAll('.card.folder-card').forEach(folder=>{
-    folder.addEventListener('dragover',e=>{
+  gallery.querySelectorAll('.card.folder-card').forEach(folder => {
+    folder.addEventListener('dragover', e => {
       e.preventDefault();
-      if(draggedType==='file'||(draggedType==='folder'&&folder.dataset.folderId!==draggedId)){
-        e.dataTransfer.dropEffect='move';
+      if (draggedType === 'file' || (draggedType === 'folder' && folder.dataset.folderId !== draggedId)) {
+        e.dataTransfer.dropEffect = 'move';
         folder.classList.add('drag-over');
       }
     });
-    folder.addEventListener('dragleave',()=>folder.classList.remove('drag-over'));
-    folder.addEventListener('drop',async e=>{
+    folder.addEventListener('dragleave', () => folder.classList.remove('drag-over'));
+    folder.addEventListener('drop', async e => {
       e.preventDefault();
       folder.classList.remove('drag-over');
-      if(!draggedId)return;
-      const targetFolderId=folder.dataset.folderId;
-      if(draggedType==='file'){
-        try{
-          const{error}=await db.from('files').update({folder_id:targetFolderId}).eq('id',draggedId);
-          if(error)throw error;
-          toast('Archivo movido','success');loadFiles();
-        }catch(err){toast('Error: '+err.message,'error')}
-      }else if(draggedType==='folder'&&draggedId!==targetFolderId){
-        if(isDescendant(draggedId,targetFolderId)){
-          toast('No puedes mover una carpeta dentro de sí misma','error');return;
-        }
-        try{
-          const{error}=await db.from('folders').update({parent_id:targetFolderId}).eq('id',draggedId);
-          if(error)throw error;
-          toast('Carpeta movida','success');
-          await loadFolders();updateFolderSelect();loadFiles();
-        }catch(err){toast('Error: '+err.message,'error')}
+      if (!draggedId) return;
+      const targetFolderId = folder.dataset.folderId;
+      if (draggedType === 'file') {
+        try {
+          await updateFileRecord(draggedId, { folder_id: targetFolderId });
+          toast('Archivo movido', 'success'); loadFiles();
+        } catch (err) { toast('Error: ' + err.message, 'error'); }
+      } else if (draggedType === 'folder' && draggedId !== targetFolderId) {
+        if (isDescendant(draggedId, targetFolderId)) { toast('No puedes mover una carpeta dentro de sí misma', 'error'); return; }
+        try {
+          await moveFolder(draggedId, targetFolderId);
+          toast('Carpeta movida', 'success');
+          await loadFolders(); updateFolderSelect(); loadFiles();
+        } catch (err) { toast('Error: ' + err.message, 'error'); }
       }
     });
   });
 }
 
-function getFileUrl(p){const{data}=db.storage.from(BUCKET).getPublicUrl(p);return data.publicUrl}
+function getFileUrl(p) { return fileUrl(p); }
 
-$('#gridViewBtn').addEventListener('click',()=>setView('grid'));
-$('#listViewBtn').addEventListener('click',()=>setView('list'));
-function setView(m){viewMode=m;gallery.classList.toggle('list-view',m==='list');$('#gridViewBtn').classList.toggle('active',m==='grid');$('#listViewBtn').classList.toggle('active',m==='list')}
+$('#gridViewBtn').addEventListener('click', () => setView('grid'));
+$('#listViewBtn').addEventListener('click', () => setView('list'));
+function setView(m) { viewMode = m; gallery.classList.toggle('list-view', m === 'list'); $('#gridViewBtn').classList.toggle('active', m === 'grid'); $('#listViewBtn').classList.toggle('active', m === 'list'); }
 
-function getFileIcon(mt,n){
-  if(!mt)return '<i class="bi bi-file-earmark"></i>';
-  if(mt.startsWith('video/'))return '<i class="bi bi-play-circle"></i>';
-  if(mt.startsWith('audio/'))return '<i class="bi bi-music-note-beamed"></i>';
-  if(mt==='application/pdf')return '<i class="bi bi-file-earmark-pdf"></i>';
-  if(mt==='application/msword'||mt.includes('wordprocessingml')||(n&&/\.docx?$/i.test(n)))return '<i class="bi bi-file-earmark-word"></i>';
-  if(mt.includes('spreadsheet')||mt.includes('excel')||(n&&/\.xlsx?$/i.test(n)))return '<i class="bi bi-file-earmark-excel"></i>';
-  if(mt.includes('presentation')||(n&&/\.pptx?$/i.test(n)))return '<i class="bi bi-file-earmark-ppt"></i>';
-  if(mt.includes('zip')||mt.includes('rar')||mt.includes('7z')||mt.includes('tar')||mt.includes('gzip'))return '<i class="bi bi-file-earmark-zip"></i>';
-  if(mt.startsWith('text/'))return '<i class="bi bi-file-earmark-text"></i>';
-  if(mt.includes('json'))return '<i class="bi bi-filetype-json"></i>';
-  if(mt.includes('javascript'))return '<i class="bi bi-filetype-js"></i>';
-  if(mt.includes('html'))return '<i class="bi bi-filetype-html"></i>';
-  if(mt.includes('css'))return '<i class="bi bi-filetype-css"></i>';
-  if(mt.startsWith('image/'))return '<i class="bi bi-file-earmark-image"></i>';
+function getFileIcon(mt, n) {
+  if (!mt) return '<i class="bi bi-file-earmark"></i>';
+  if (mt.startsWith('video/')) return '<i class="bi bi-play-circle"></i>';
+  if (mt.startsWith('audio/')) return '<i class="bi bi-music-note-beamed"></i>';
+  if (mt === 'application/pdf') return '<i class="bi bi-file-earmark-pdf"></i>';
+  if (mt === 'application/msword' || mt.includes('wordprocessingml') || (n && /\.docx?$/i.test(n))) return '<i class="bi bi-file-earmark-word"></i>';
+  if (mt.includes('spreadsheet') || mt.includes('excel') || (n && /\.xlsx?$/i.test(n))) return '<i class="bi bi-file-earmark-excel"></i>';
+  if (mt.includes('presentation') || (n && /\.pptx?$/i.test(n))) return '<i class="bi bi-file-earmark-ppt"></i>';
+  if (mt.includes('zip') || mt.includes('rar') || mt.includes('7z') || mt.includes('tar') || mt.includes('gzip')) return '<i class="bi bi-file-earmark-zip"></i>';
+  if (mt.startsWith('text/')) return '<i class="bi bi-file-earmark-text"></i>';
+  if (mt.includes('json')) return '<i class="bi bi-filetype-json"></i>';
+  if (mt.includes('javascript')) return '<i class="bi bi-filetype-js"></i>';
+  if (mt.includes('html')) return '<i class="bi bi-filetype-html"></i>';
+  if (mt.includes('css')) return '<i class="bi bi-filetype-css"></i>';
+  if (mt.startsWith('image/')) return '<i class="bi bi-file-earmark-image"></i>';
   return '<i class="bi bi-file-earmark"></i>';
 }
-function getExtension(n){const e=n.split('.').pop();return e&&e.length<=6?e.toUpperCase():'FILE'}
-function formatSize(b){if(!b)return '0 B';const k=1024,s=['B','KB','MB','GB'],i=Math.floor(Math.log(b)/Math.log(k));return parseFloat((b/Math.pow(k,i)).toFixed(1))+' '+s[i]}
-function formatDate(d){if(!d)return '';return new Date(d).toLocaleDateString('es-ES',{day:'2-digit',month:'short',year:'numeric'})}
-function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function getExtension(n) { const e = n.split('.').pop(); return e && e.length <= 6 ? e.toUpperCase() : 'FILE'; }
+function formatSize(b) { if (!b) return '0 B'; const k = 1024, s = ['B', 'KB', 'MB', 'GB'], i = Math.floor(Math.log(b) / Math.log(k)); return parseFloat((b / Math.pow(k, i)).toFixed(1)) + ' ' + s[i]; }
+function formatDate(d) { if (!d) return ''; return new Date(d).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 // === DETAIL ===
 
-async function showDetail(id){
-  const f=allFiles.find(x=>x.id==id);if(!f)return;
-  currentFile=f;
-  const displayName=getDisplayName(f);
-  $('#detailTitle').textContent=displayName;
-  const url=getFileUrl(f.storage_path);
-  const isI=f.mimetype&&f.mimetype.startsWith('image/'),isV=f.mimetype&&f.mimetype.startsWith('video/'),isA=f.mimetype&&f.mimetype.startsWith('audio/');
-  let mh='';if(isI)mh=`<img class="detail-img" src="${url}" alt="${esc(displayName)}" loading="eager">`;else if(isV)mh=`<video class="detail-img" src="${url}" controls></video>`;else if(isA)mh=`<audio style="width:100%;margin-bottom:1rem;border-radius:var(--radius-sm);" src="${url}" controls></audio>`;
-  const folderName=f.folder_id?allFolders.find(fo=>fo.id===f.folder_id)?.name||'Otra':'Raíz';
-  $('#detailBody').innerHTML=`${mh}<div class="detail-info"><div class="detail-info-row"><span class="label">Nombre</span><span class="value">${esc(displayName)}</span></div>${f.custom_name?`<div class="detail-info-row"><span class="label">Original</span><span class="value">${esc(f.name)}</span></div>`:''}<div class="detail-info-row"><span class="label">Tipo</span><span class="value">${f.mimetype||'N/A'}</span></div><div class="detail-info-row"><span class="label">Tamaño</span><span class="value">${formatSize(f.size)}</span></div><div class="detail-info-row"><span class="label">Carpeta</span><span class="value"><i class="bi bi-folder"></i> ${esc(folderName)}</span></div><div class="detail-info-row"><span class="label">Subido</span><span class="value">${formatDate(f.created_at)}</span></div></div>`;
-  $('#detailDownload').href='#';$('#detailDownload').onclick=e=>{e.preventDefault();downloadSingleFile(currentFile)};
+async function showDetail(id) {
+  const f = allFiles.find(x => x.id == id); if (!f) return;
+  currentFile = f;
+  const displayName = getDisplayName(f);
+  $('#detailTitle').textContent = displayName;
+  const url = fileUrl(f.storage_path);
+  const isI = f.mimetype && f.mimetype.startsWith('image/'), isV = f.mimetype && f.mimetype.startsWith('video/'), isA = f.mimetype && f.mimetype.startsWith('audio/');
+  let mh = ''; if (isI) mh = `<img class="detail-img" src="${url}" alt="${esc(displayName)}" loading="eager">`; else if (isV) mh = `<video class="detail-img" src="${url}" controls></video>`; else if (isA) mh = `<audio style="width:100%;margin-bottom:1rem;border-radius:var(--radius-sm);" src="${url}" controls></audio>`;
+  const folderName = f.folder_id ? allFolders.find(fo => fo.id === f.folder_id)?.name || 'Otra' : 'Raíz';
+  $('#detailBody').innerHTML = `${mh}<div class="detail-info"><div class="detail-info-row"><span class="label">Nombre</span><span class="value">${esc(displayName)}</span></div>${f.custom_name ? `<div class="detail-info-row"><span class="label">Original</span><span class="value">${esc(f.name)}</span></div>` : ''}<div class="detail-info-row"><span class="label">Tipo</span><span class="value">${f.mimetype || 'N/A'}</span></div><div class="detail-info-row"><span class="label">Tamaño</span><span class="value">${formatSize(f.size)}</span></div><div class="detail-info-row"><span class="label">Carpeta</span><span class="value"><i class="bi bi-folder"></i> ${esc(folderName)}</span></div><div class="detail-info-row"><span class="label">Subido</span><span class="value">${formatDate(f.created_at)}</span></div></div>`;
+  $('#detailDownload').href = '#'; $('#detailDownload').onclick = e => { e.preventDefault(); downloadSingleFile(currentFile); };
   openModal(detailModal);
 }
 
-async function downloadSingleFile(f){
-  if(!f)return;
-  toast('Descargando...','info');
-  try{
-    const{data,error}=await db.storage.from(BUCKET).download(f.storage_path);
-    if(error)throw error;
-    const a=document.createElement('a');a.href=URL.createObjectURL(data);
-    a.download=f.name;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
-    toast('Descargado','success');
-  }catch(err){toast('Error al descargar: '+err.message,'error')}
+async function downloadSingleFile(f) {
+  if (!f) return;
+  toast('Descargando...', 'info');
+  try {
+    const blob = await (await fetch(fileUrl(f.storage_path))).blob();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    toast('Descargado', 'success');
+  } catch (err) { toast('Error al descargar: ' + err.message, 'error'); }
 }
 
-$('#detailDeleteBtn').addEventListener('click',()=>{closeModal(detailModal);$('#confirmTitle').textContent='Eliminar archivo';$('#confirmMessage').textContent='Esta acción no se puede deshacer.';openModal(confirmModal);$('#confirmDeleteBtn').onclick=deleteCurrentFile;});
-$('#cancelDeleteBtn').addEventListener('click',()=>closeModal(confirmModal));
+$('#detailDeleteBtn').addEventListener('click', () => { closeModal(detailModal); $('#confirmTitle').textContent = 'Eliminar archivo'; $('#confirmMessage').textContent = 'Esta acción no se puede deshacer.'; openModal(confirmModal); $('#confirmDeleteBtn').onclick = deleteCurrentFile; });
+$('#cancelDeleteBtn').addEventListener('click', () => closeModal(confirmModal));
 
-async function deleteCurrentFile(){
-  if(!currentFile)return;
-  try{await db.storage.from(BUCKET).remove([currentFile.storage_path]);await db.from('files').delete().eq('id',currentFile.id);closeModal(confirmModal);toast('Archivo eliminado','success');loadFiles()}
-  catch(err){toast('Error: '+err.message,'error')}
+async function deleteCurrentFile() {
+  if (!currentFile) return;
+  try { await deleteStorageFile(currentFile.storage_path); await removeFileRecord(currentFile.id); closeModal(confirmModal); toast('Archivo eliminado', 'success'); loadFiles(); }
+  catch (err) { toast('Error: ' + err.message, 'error'); }
 }
 
 // === RENAME ===
 
-$('#detailRenameBtn').addEventListener('click',()=>{
-  if(!currentFile)return;
-  renameInput.value=getDisplayName(currentFile);
+$('#detailRenameBtn').addEventListener('click', () => {
+  if (!currentFile) return;
+  renameInput.value = getDisplayName(currentFile);
   closeModal(detailModal);
   openModal(renameModal);
-  setTimeout(()=>{renameInput.focus();renameInput.select()},100);
+  setTimeout(() => { renameInput.focus(); renameInput.select(); }, 100);
 });
 
-renameForm.addEventListener('submit',async e=>{
+renameForm.addEventListener('submit', async e => {
   e.preventDefault();
-  if(!currentFile)return;
-  const newName=renameInput.value.trim();
-  if(!newName)return toast('Escribe un nombre','error');
-  try{
-    const{error}=await db.from('files').update({custom_name:newName}).eq('id',currentFile.id);
-    if(error)throw error;
-    closeModal(renameModal);toast('Archivo renombrado','success');loadFiles();
-  }catch(err){toast('Error: '+err.message,'error')}
+  if (!currentFile) return;
+  const newName = renameInput.value.trim();
+  if (!newName) return toast('Escribe un nombre', 'error');
+  try {
+    await updateFileRecord(currentFile.id, { custom_name: newName });
+    closeModal(renameModal); toast('Archivo renombrado', 'success'); loadFiles();
+  } catch (err) { toast('Error: ' + err.message, 'error'); }
 });
 
 // === MOVE ===
 
-$('#detailMoveBtn').addEventListener('click',()=>{
-  if(!currentFile)return;
-  moveFileIds=[currentFile.id];
+$('#detailMoveBtn').addEventListener('click', () => {
+  if (!currentFile) return;
+  moveFileIds = [currentFile.id];
   closeModal(detailModal);
   openMoveModal();
 });
 
-function openMoveModal(){
-  moveTargetFolder=null;
+function openMoveModal() {
+  moveTargetFolder = null;
   renderMoveTree();
   openModal(moveModal);
 }
 
-function renderMoveTree(){
-  const childFolders=allFolders.filter(f=>f.parent_id===(moveTargetFolder||null));
-  let html=`<div class="move-tree-item${moveTargetFolder===null?' selected':''}" data-folder="">`;
-  html+=`<span class="tree-icon"><i class="bi bi-house-fill"></i></span><span>Carpeta raíz</span></div>`;
-  function renderLevel(parentId,depth){
-    const children=allFolders.filter(f=>f.parent_id===parentId);
-    children.forEach(f=>{
-      const indent='&nbsp;'.repeat(depth*4);
-      const isSelected=moveTargetFolder===f.id;
-      html+=`<div class="move-tree-item${isSelected?' selected':''}" data-folder="${f.id}">`;
-      html+=`<span class="tree-indent">${indent}</span><span class="tree-icon"><i class="bi bi-folder-fill"></i></span><span>${esc(f.name)}</span></div>`;
-      renderLevel(f.id,depth+1);
+function renderMoveTree() {
+  const childFolders = allFolders.filter(f => f.parent_id === (moveTargetFolder || null));
+  let html = `<div class="move-tree-item${moveTargetFolder === null ? ' selected' : ''}" data-folder="">`;
+  html += `<span class="tree-icon"><i class="bi bi-house-fill"></i></span><span>Carpeta raíz</span></div>`;
+  function renderLevel(parentId, depth) {
+    const children = allFolders.filter(f => f.parent_id === parentId);
+    children.forEach(f => {
+      const indent = '&nbsp;'.repeat(depth * 4);
+      const isSelected = moveTargetFolder === f.id;
+      html += `<div class="move-tree-item${isSelected ? ' selected' : ''}" data-folder="${f.id}">`;
+      html += `<span class="tree-indent">${indent}</span><span class="tree-icon"><i class="bi bi-folder-fill"></i></span><span>${esc(f.name)}</span></div>`;
+      renderLevel(f.id, depth + 1);
     });
   }
-  renderLevel(null,1);
-  if(!childFolders.length&&!allFolders.length){
-    html+=`<div class="move-tree-empty">No hay carpetas. Crea una primero.</div>`;
+  renderLevel(null, 1);
+  if (!childFolders.length && !allFolders.length) {
+    html += `<div class="move-tree-empty">No hay carpetas. Crea una primero.</div>`;
   }
-  moveTree.innerHTML=html;
-  moveTree.querySelectorAll('.move-tree-item').forEach(el=>{
-    el.addEventListener('click',()=>{
-      moveTree.querySelectorAll('.move-tree-item').forEach(x=>x.classList.remove('selected'));
+  moveTree.innerHTML = html;
+  moveTree.querySelectorAll('.move-tree-item').forEach(el => {
+    el.addEventListener('click', () => {
+      moveTree.querySelectorAll('.move-tree-item').forEach(x => x.classList.remove('selected'));
       el.classList.add('selected');
-      moveTargetFolder=el.dataset.folder||null;
+      moveTargetFolder = el.dataset.folder || null;
     });
   });
 }
 
-moveConfirmBtn.addEventListener('click',async()=>{
-  if(!moveFileIds.length)return;
-  try{
-    for(const id of moveFileIds){
-      const{error}=await db.from('files').update({folder_id:moveTargetFolder||null}).eq('id',id);
-      if(error)throw error;
+moveConfirmBtn.addEventListener('click', async () => {
+  if (!moveFileIds.length) return;
+  try {
+    for (const id of moveFileIds) {
+      await updateFileRecord(id, { folder_id: moveTargetFolder || null });
     }
-    closeModal(moveModal);toast(`${moveFileIds.length} archivo(s) movido(s)`,'success');
-    selectedIds.clear();renderSelectionBar();loadFiles();
-  }catch(err){toast('Error: '+err.message,'error')}
+    closeModal(moveModal); toast(`${moveFileIds.length} archivo(s) movido(s)`, 'success');
+    selectedIds.clear(); renderSelectionBar(); loadFiles();
+  } catch (err) { toast('Error: ' + err.message, 'error'); }
 });
 
-moveCancelBtn.addEventListener('click',()=>closeModal(moveModal));
+moveCancelBtn.addEventListener('click', () => closeModal(moveModal));
 
-if(window.supabase)initSupabase();else window.addEventListener('load',initSupabase);
+initAuth();
