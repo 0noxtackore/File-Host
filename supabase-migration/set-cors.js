@@ -28,7 +28,7 @@ if (!fs.existsSync(SERVICE_ACCOUNT)) {
 const cors = JSON.parse(fs.readFileSync(CORS_FILE, 'utf8'));
 
 admin.initializeApp({
-  credential: admin.cert(JSON.parse(fs.readFileSync(SERVICE_ACCOUNT, 'utf8'))),
+  credential: admin.credential.cert(JSON.parse(fs.readFileSync(SERVICE_ACCOUNT, 'utf8'))),
   databaseURL: 'https://file-host-d3a49-default-rtdb.europe-west1.firebasedatabase.app',
   storageBucket: BUCKET,
 });

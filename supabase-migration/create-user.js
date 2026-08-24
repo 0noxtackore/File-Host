@@ -22,7 +22,7 @@ if (!require('fs').existsSync(SERVICE_ACCOUNT)) {
 }
 
 admin.initializeApp({
-  credential: admin.cert(require(SERVICE_ACCOUNT)),
+  credential: admin.credential.cert(require(SERVICE_ACCOUNT)),
   databaseURL: 'https://file-host-d3a49-default-rtdb.europe-west1.firebasedatabase.app',
 });
 
