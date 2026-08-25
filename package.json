@@ -14,14 +14,15 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "@supabase/supabase-js": "^2.112.4",
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
     "multer": "^2.2.0",
     "uuid": "^14.0.1"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.112.4",
     "esbuild": "^0.28.1",
-    "firebase-admin": "^12.7.0"
+    "firebase-admin": "^12.7.0",
+    "pg": "^8.23.0"
   }
 }

@@ -1,6 +1,7 @@
 import {
-  auth,
-  fileUrl,
+  supabase,
+  BUCKET,
+  publicUrl,
   fetchFolders,
   createFolder,
   renameFolder,
@@ -11,14 +12,7 @@ import {
   addFileRecord,
   updateFileRecord,
   removeFileRecord,
-} from './firebase.js';
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signInAnonymously,
-  signOut,
-} from 'firebase/auth';
+} from './sb.js';
 
 let selectedFiles = [], currentFile = null, allFiles = [], allFolders = [], currentFolder = null, viewMode = 'grid';
 let selectedIds = new Set(), moveTargetFolder = null, moveFileIds = [], currentFolderAction = null;
@@ -26,30 +20,34 @@ const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s)
 
 function initAuth() {
   const overlay = $('#authOverlay');
-  onAuthStateChanged(auth, user => {
-    if (user) {
-      overlay.style.display = 'none';
-      loadContent();
-    } else {
-      overlay.style.display = 'flex';
-    }
+  const open = () => { overlay.style.display = 'none'; loadContent(); };
+  const show = () => { overlay.style.display = 'flex'; };
+
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (session) open();
+    else show();
   });
+  supabase.auth.onAuthStateChange((_e, session) => { if (session) open(); else show(); });
 
   const email = $('#authEmail'), pass = $('#authPass');
 
   $('#loginBtn').addEventListener('click', async () => {
-    try { await signInWithEmailAndPassword(auth, email.value.trim(), pass.value); }
-    catch (e) { toast('Error: ' + e.message, 'error'); }
+    const em = email.value.trim(), pw = pass.value;
+    if (!em || !pw) { toast('Ingresa correo y contraseña', 'error'); return; }
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
+      if (error) throw error;
+      // onAuthStateChange will open the panel on success.
+    } catch (e) {
+      toast('Datos incorrectos', 'error');
+    }
   });
-  $('#registerBtn').addEventListener('click', async () => {
-    try { await createUserWithEmailAndPassword(auth, email.value.trim(), pass.value); }
-    catch (e) { toast('Error: ' + e.message, 'error'); }
+  $('#logoutBtn').addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    email.value = '';
+    pass.value = '';
+    show();
   });
-  $('#guestBtn').addEventListener('click', async () => {
-    try { await signInAnonymously(auth); }
-    catch (e) { toast('Error: ' + e.message, 'error'); }
-  });
-  $('#logoutBtn').addEventListener('click', () => signOut(auth));
 }
 
 const uploadModal = $('#uploadModal'), detailModal = $('#detailModal'), confirmModal = $('#confirmModal'),
@@ -304,6 +302,8 @@ $('#batchDeleteBtn').addEventListener('click', async () => {
     const ids = [...selectedIds];
     try {
       for (const id of ids) {
+        const f = allFiles.find(x => x.id === id);
+        if (f && f.storage_path) { try { await supabase.storage.from(BUCKET).remove([f.storage_path]); } catch (e) {} }
         await removeFileRecord(id);
       }
       selectedIds.clear(); closeModal(confirmModal); toast(`${ids.length} archivo(s) eliminado(s)`, 'success'); loadFiles();
@@ -329,12 +329,8 @@ $('#batchDownloadBtn').addEventListener('click', async () => {
     let failed = 0;
     await Promise.all(files.map(async f => {
       try {
-        let full = f;
-        if (!f.data) { try { full = await getFileFull(f.id); } catch (e) { full = f; } }
-        let blob;
-        if (full.data) { blob = await (await fetch(full.data)).blob(); }
-        else { blob = await (await fetch(fileUrl(full.storage_path))).blob(); }
-        zip.file(full.name, blob);
+        const blob = await (await fetch(f.url)).blob();
+        zip.file(f.name, blob);
       } catch (e) { failed++; }
     }));
     if (Object.keys(zip.files).length === 0) { toast('No se pudieron descargar los archivos', 'error'); return; }
@@ -390,34 +386,21 @@ async function prepareFile(f) {
   return f;
 }
 
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
-
 uploadForm.addEventListener('submit', async e => {
   e.preventDefault();
   if (!selectedFiles.length) return toast('Selecciona al menos un archivo', 'error');
   const sb = $('#submitBtn'), pg = $('#uploadProgress'), pf = $('#progressFill'), pp = $('#progressPercent');
   sb.disabled = true; pg.style.display = 'block';
   const tot = selectedFiles.length; let dn = 0, ok = 0;
-  const EMBED_LIMIT = 700 * 1024; // Firestore ~1MB/doc cap (base64 adds ~33%)
   const customName = customNameInput.value.trim() || null;
   const targetFolder = folderSelect.value || null;
   try {
     for (const file of selectedFiles) {
       const ready = await prepareFile(file);
       const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${ready.name}`;
-      if (ready.size > EMBED_LIMIT) {
-        toast(`"${file.name}" supera el límite de Firestore (~700 KB) y no se subió`, 'error');
-        dn++; const pct = Math.round((dn / tot) * 100); pf.style.width = pct + '%'; pp.textContent = pct + '%';
-        continue;
-      }
-      const dataUrl = await fileToDataUrl(ready);
+      const { error: ue } = await supabase.storage.from(BUCKET).upload(path, ready, { cacheControl: '31536000', upsert: false });
+      if (ue) throw ue;
+      const url = publicUrl(path);
       const displayName = customName && tot === 1 ? customName : file.name;
       await addFileRecord({
         name: file.name,
@@ -426,7 +409,7 @@ uploadForm.addEventListener('submit', async e => {
         storage_path: path,
         folder_id: targetFolder,
         custom_name: customName && tot === 1 ? customName : null,
-        data: dataUrl,
+        url,
       });
       ok++; dn++; const pct = Math.round((dn / tot) * 100); pf.style.width = pct + '%'; pp.textContent = pct + '%';
     }
@@ -473,7 +456,7 @@ function renderGallery(files) {
     const isExcel = (f.mimetype && f.mimetype.includes('spreadsheet')) || (f.mimetype && f.mimetype.includes('excel')) || /\.xlsx?$/i.test(f.name);
     const isPpt = (f.mimetype && f.mimetype.includes('presentation')) || /\.pptx?$/i.test(f.name);
     let preview = '';
-    if (isImg) preview = `<div class="icon-placeholder"><i class="bi bi-image"></i></div>`;
+    if (isImg) preview = `<img src="${thumbSrc(f)}" alt="${esc(displayName)}" loading="lazy" decoding="async">`;
     else if (isVid) preview = `<div class="icon-placeholder"><i class="bi bi-play-circle"></i></div>`;
     else if (isPdf) preview = `<div class="doc-icon-card doc-pdf"><i class="bi bi-file-earmark-pdf"></i></div>`;
     else if (isWord) preview = `<div class="doc-icon-card doc-word"><i class="bi bi-file-earmark-word"></i></div>`;
@@ -557,9 +540,12 @@ function renderGallery(files) {
   });
 }
 
-function getFileUrl(p) { return fileUrl(p); }
-// Prefer an embedded base64 blob (Firestore) over the Storage URL.
-function getFileSrc(f) { return (f && f.data) ? f.data : fileUrl(f.storage_path); }
+// Compressed thumbnail for the gallery (Supabase transforms the original on the fly).
+function thumbSrc(f) {
+  if (!f || !f.url) return '';
+  if (f.mimetype && f.mimetype.startsWith('image/')) return `${f.url}?width=400&format=webp`;
+  return f.url;
+}
 
 $('#gridViewBtn').addEventListener('click', () => setView('grid'));
 $('#listViewBtn').addEventListener('click', () => setView('list'));
@@ -596,7 +582,7 @@ async function showDetail(id) {
   currentFile = f;
   const displayName = getDisplayName(f);
   $('#detailTitle').textContent = displayName;
-  const url = getFileSrc(f);
+  const url = f.url;
   const isI = f.mimetype && f.mimetype.startsWith('image/'), isV = f.mimetype && f.mimetype.startsWith('video/'), isA = f.mimetype && f.mimetype.startsWith('audio/');
   let mh = ''; if (isI) mh = `<img class="detail-img" src="${url}" alt="${esc(displayName)}" loading="eager">`; else if (isV) mh = `<video class="detail-img" src="${url}" controls></video>`; else if (isA) mh = `<audio style="width:100%;margin-bottom:1rem;border-radius:var(--radius-sm);" src="${url}" controls></audio>`;
   const folderName = f.folder_id ? allFolders.find(fo => fo.id === f.folder_id)?.name || 'Otra' : 'Raíz';
@@ -607,25 +593,16 @@ async function showDetail(id) {
 
 async function downloadSingleFile(f) {
   if (!f) return;
-  // Ensure we have the embedded base64 (gallery list excludes it).
-  let full = f;
-  if (!f.data) { try { full = await getFileFull(f.id); } catch (e) { full = f; } }
   toast('Descargando...', 'info');
   try {
-    if (full.data) {
-      const a = document.createElement('a'); a.href = full.data; a.download = full.name;
-      document.body.appendChild(a); a.click(); a.remove();
-      toast('Descargado', 'success');
-      return;
-    }
-    const res = await fetch(fileUrl(full.storage_path));
+    const res = await fetch(f.url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = full.name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
     toast('Descargado', 'success');
   } catch (err) {
-    window.open(fileUrl(full.storage_path), '_blank');
+    window.open(f.url, '_blank');
     toast('No se pudo descargar automáticamente, abriendo el archivo', 'info');
   }
 }
@@ -635,7 +612,10 @@ $('#cancelDeleteBtn').addEventListener('click', () => closeModal(confirmModal));
 
 async function deleteCurrentFile() {
   if (!currentFile) return;
-  try { await removeFileRecord(currentFile.id); closeModal(confirmModal); toast('Archivo eliminado', 'success'); loadFiles(); }
+  try {
+    if (currentFile.storage_path) { try { await supabase.storage.from(BUCKET).remove([currentFile.storage_path]); } catch (e) {} }
+    await removeFileRecord(currentFile.id); closeModal(confirmModal); toast('Archivo eliminado', 'success'); loadFiles();
+  }
   catch (err) { toast('Error: ' + err.message, 'error'); }
 }
 

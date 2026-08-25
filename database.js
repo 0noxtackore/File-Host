@@ -16,6 +16,17 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT,
+    original_name TEXT,
+    mimetype TEXT,
+    size INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
 const columns = db.prepare("PRAGMA table_info(files)").all().map(c => c.name);
 if (!columns.includes('folder_id')) {
   db.exec(`ALTER TABLE files ADD COLUMN folder_id TEXT`);

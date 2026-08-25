@@ -1,38 +1,42 @@
 'use strict';
 
 /**
- * One-time migration from Supabase to Firebase.
+ * Migration refresh: Firestore "files" -> Supabase Storage.
  *
- *   1. Imports supabase-migration/db/folders.json  -> Firestore "folders"
- *   2. Imports supabase-migration/db/files.json    -> Firestore "files"
- *   3. Uploads  supabase-migration/files/*          -> Firebase Storage bucket
+ * For every file document that still carries an embedded base64 `data` field,
+ * we upload the original blob to Supabase Storage (bucket "files", keyed by the
+ * existing `storage_path`), set `url` to the public URL, and delete `data` from
+ * Firestore. Documents without `data` only get their `url` refreshed (their
+ * blob is assumed already present in Supabase from a previous run).
  *
- * Requirements:
- *   - `npm install firebase-admin` (already added as a dev dependency)
- *   - A service account key saved as supabase-migration/serviceAccount.json
- *     (download it from Firebase console: Project settings > Service accounts).
+ *   node supabase-migration/migrate.js            # upload from data + refresh url
+ *   SKIP_UPLOAD=1 node supabase-migration/migrate.js   # only refresh url (no re-upload)
  *
- * Re-runnable: Firestore docs are keyed by their original IDs and Storage
- * uploads overwrite, so running it again is safe.
- *
- *   node supabase-migration/migrate.js
+ * Requires: firebase-admin + serviceAccount.json in this folder.
  */
 
 const fs = require('fs');
 const path = require('path');
 const admin = require('firebase-admin');
+const { createClient } = require('@supabase/supabase-js');
 
 const ROOT = __dirname;
-const FILES_DIR = path.join(ROOT, 'files');
-const DB_DIR = path.join(ROOT, 'db');
 const SERVICE_ACCOUNT = path.join(ROOT, 'serviceAccount.json');
-const BUCKET = 'file-host-d3a49.firebasestorage.app';
+
+const SUPABASE_URL = 'https://qxgmhfugoxzzqblztuvq.supabase.co';
+const SUPABASE_BUCKET = 'files';
+const SUPABASE_KEY = 'sb_publishable_zs0n2Xm3WrWg2YcE7SulmA_VMPU7WVT';
+const SKIP_UPLOAD = process.env.SKIP_UPLOAD === '1';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+function publicUrl(storagePath) {
+  return `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${encodeURIComponent(storagePath)}`;
+}
 
 function loadServiceAccount() {
   if (!fs.existsSync(SERVICE_ACCOUNT)) {
-    console.error('\nMissing service account key.');
-    console.error('Download it from Firebase console (Project settings > Service accounts)');
-    console.error('and save it as:\n  ' + SERVICE_ACCOUNT + '\n');
+    console.error('\nMissing service account key:\n  ' + SERVICE_ACCOUNT + '\n');
     process.exit(1);
   }
   return JSON.parse(fs.readFileSync(SERVICE_ACCOUNT, 'utf8'));
@@ -42,92 +46,42 @@ async function main() {
   admin.initializeApp({
     credential: admin.credential.cert(loadServiceAccount()),
     databaseURL: 'https://file-host-d3a49-default-rtdb.europe-west1.firebasedatabase.app',
-    storageBucket: BUCKET,
   });
   const db = admin.firestore();
-  const bucket = admin.storage().bucket(BUCKET);
 
-  // --- Folders ---
-  const folders = JSON.parse(fs.readFileSync(path.join(DB_DIR, 'folders.json'), 'utf8'));
-  console.log(`Importing ${folders.length} folder(s)...`);
-  for (const f of folders) {
-    await db.collection('folders').doc(String(f.id)).set({
-      name: f.name,
-      parent_id: f.parent_id || null,
-      created_at: f.created_at || new Date().toISOString(),
-    });
-  }
-  console.log(`  ✓ folders`);
+  const snap = await db.collection('files').get();
+  let updated = 0, uploaded = 0, skipped = 0;
 
-  // --- Files (metadata, optional base64 embedding) ---
-  const files = JSON.parse(fs.readFileSync(path.join(DB_DIR, 'files.json'), 'utf8'));
-  const base64Mode = process.env.BASE64 === '1';
-  const EMBED_LIMIT = 700 * 1024; // raw bytes; base64 adds ~33%, stay under Firestore's 1MB/doc limit
-  console.log(`Importing ${files.length} file record(s)...`);
-  let embedded = 0, skippedBig = 0;
-  for (const f of files) {
-    const doc = {
-      name: f.name,
-      mimetype: f.mimetype,
-      size: f.size,
-      storage_path: f.storage_path,
-      folder_id: f.folder_id || null,
-      custom_name: f.custom_name || null,
-      created_at: f.created_at || new Date().toISOString(),
-    };
-    if (base64Mode) {
-      const local = path.join(FILES_DIR, f.storage_path);
-      if (!fs.existsSync(local)) {
-        console.warn(`  ⚠ missing local file, skipping data: ${f.storage_path}`);
-      } else if (f.size <= EMBED_LIMIT) {
-        const b64 = fs.readFileSync(local).toString('base64');
-        doc.data = `data:${f.mimetype || 'application/octet-stream'};base64,${b64}`;
-        embedded++;
-      } else {
-        doc.data_skipped = true;
-        skippedBig++;
-        console.warn(`  ⚠ too large for Firestore (${f.size} bytes), skipped base64: ${f.storage_path}`);
+  for (const d of snap.docs) {
+    const f = d.data();
+    if (!f.storage_path) { skipped++; continue; }
+    const url = publicUrl(f.storage_path);
+
+    if (f.data && !SKIP_UPLOAD) {
+      try {
+        const b64 = String(f.data).includes(',') ? f.data.split(',').pop() : f.data;
+        const buf = Buffer.from(b64, 'base64');
+        const { error } = await supabase.storage
+          .from(SUPABASE_BUCKET)
+          .upload(f.storage_path, buf, { contentType: f.mimetype || 'application/octet-stream', upsert: true });
+        if (error) {
+          console.error(`  upload failed ${f.storage_path}: ${error.message}`);
+        } else {
+          uploaded++;
+        }
+      } catch (e) {
+        console.error(`  upload error ${f.storage_path}: ${e.message}`);
       }
     }
-    await db.collection('files').doc(String(f.id)).set(doc);
-  }
-  console.log(`  ✓ file records (${embedded} embedded as base64${skippedBig ? `, ${skippedBig} too large to embed` : ''})`);
 
-  // --- Storage upload (only when not embedding base64) ---
-  if (base64Mode) {
-    console.log('Migration complete (base64 embedded in Firestore, no Storage used).');
-    process.exit(0);
-  }
-  if (process.env.SKIP_STORAGE) {
-    console.log('Skipping Storage upload (SKIP_STORAGE is set).');
-    console.log('Migration complete (metadata only).');
-    process.exit(0);
+    const update = { url };
+    if (f.data) update.data = admin.firestore.FieldValue.delete();
+    await d.ref.update(update);
+    updated++;
   }
 
-  console.log(`Uploading ${files.length} file(s) to Storage...`);
-  let ok = 0;
-  for (const f of files) {
-    const local = path.join(FILES_DIR, f.storage_path);
-    if (!fs.existsSync(local)) {
-      console.warn(`  ⚠ missing local file, skipping: ${f.storage_path}`);
-      continue;
-    }
-    try {
-      await bucket.upload(local, {
-        destination: f.storage_path,
-        metadata: { contentType: f.mimetype || 'application/octet-stream' },
-      });
-      ok++;
-    } catch (err) {
-      console.error(`  ✕ ${f.storage_path}: ${err.message}`);
-    }
-  }
-  console.log(`\nDone. Uploaded ${ok}/${files.length} file(s) to Storage.`);
-  console.log('Migration complete.');
+  console.log(`\nDone. updated=${updated} uploaded=${uploaded} skipped=${skipped}`);
   process.exit(0);
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch(err => { console.error(err); process.exit(1); });
