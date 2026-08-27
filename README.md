@@ -241,5 +241,3 @@ The schema is created/updated automatically on startup in `database.js`.
 ## License
 
 This project is licensed under the [ISC License](LICENSE).
-<!-- achv: pr 1 -->
-<!-- achv: pr 2 -->
