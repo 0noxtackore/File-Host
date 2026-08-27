@@ -309,7 +309,7 @@ $('#batchDeleteBtn').addEventListener('click', async () => {
         if (f && f.storage_path) { try { await supabase.storage.from(BUCKET).remove([f.storage_path]); } catch (e) {} }
         await removeFileRecord(id);
       }
-      selectedIds.clear(); closeModal(confirmModal); toast(`${ids.length} archivo(s) eliminado(s)`, 'success'); loadFiles();
+      selectedIds.clear(); renderSelectionBar(); closeModal(confirmModal); toast(`${ids.length} archivo(s) eliminado(s)`, 'success'); loadFiles();
     } catch (err) { toast('Error: ' + err.message, 'error'); }
   };
 });
@@ -624,8 +624,8 @@ $('#cancelDeleteBtn').addEventListener('click', () => closeModal(confirmModal));
 async function deleteCurrentFile() {
   if (!currentFile) return;
   try {
-    if (currentFile.storage_path) { try { await supabase.storage.from(BUCKET).remove([currentFile.storage_path]); } catch (e) {} }
-    await removeFileRecord(currentFile.id); closeModal(confirmModal); toast('Archivo eliminado', 'success'); loadFiles();
+     if (currentFile.storage_path) { try { await supabase.storage.from(BUCKET).remove([currentFile.storage_path]); } catch (e) {} }
+     await removeFileRecord(currentFile.id); selectedIds.delete(currentFile.id); renderSelectionBar(); currentFile = null; closeModal(confirmModal); toast('Archivo eliminado', 'success'); loadFiles();
   }
   catch (err) { toast('Error: ' + err.message, 'error'); }
 }
