@@ -22,8 +22,34 @@ function genId() {
   return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
 }
 
-// === AUTH ===
-// (auth is supabase.auth; initAuth in app.js uses it directly)
+// === AUTH (PIN) ===
+// The app no longer uses email/password. Access is granted by a PIN
+// stored in the `pins` table on Supabase. We keep a local session flag
+// in localStorage so reloads stay authenticated.
+
+const PIN_SESSION_KEY = 'fh_pin_session';
+
+export async function verifyPin(pin) {
+  const { data, error } = await supabase
+    .from('pins')
+    .select('pin')
+    .eq('pin', pin)
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+export function setSession() {
+  localStorage.setItem(PIN_SESSION_KEY, '1');
+}
+
+export function clearSession() {
+  localStorage.removeItem(PIN_SESSION_KEY);
+}
+
+export function getSession() {
+  return localStorage.getItem(PIN_SESSION_KEY) === '1';
+}
 
 // === FOLDERS ===
 

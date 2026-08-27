@@ -12,6 +12,10 @@ import {
   addFileRecord,
   updateFileRecord,
   removeFileRecord,
+  verifyPin,
+  setSession,
+  clearSession,
+  getSession,
 } from './sb.js';
 
 let selectedFiles = [], currentFile = null, allFiles = [], allFolders = [], currentFolder = null, viewMode = 'grid';
@@ -23,29 +27,31 @@ function initAuth() {
   const open = () => { overlay.style.display = 'none'; loadContent(); };
   const show = () => { overlay.style.display = 'flex'; };
 
-  supabase.auth.getSession().then(({ data: { session } }) => {
-    if (session) open();
-    else show();
-  });
-  supabase.auth.onAuthStateChange((_e, session) => { if (session) open(); else show(); });
+  if (getSession()) open();
+  else show();
 
-  const email = $('#authEmail'), pass = $('#authPass');
+  const pinInput = $('#authPin');
 
-  $('#loginBtn').addEventListener('click', async () => {
-    const em = email.value.trim(), pw = pass.value;
-    if (!em || !pw) { toast('Ingresa correo y contraseña', 'error'); return; }
+  const doLogin = async () => {
+    const pin = pinInput.value.trim();
+    if (!pin) { toast('Ingresa tu PIN', 'error'); return; }
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
-      if (error) throw error;
-      // onAuthStateChange will open the panel on success.
+      const ok = await verifyPin(pin);
+      if (!ok) throw new Error('PIN incorrecto');
+      setSession();
+      pinInput.value = '';
+      open();
     } catch (e) {
-      toast('Datos incorrectos', 'error');
+      toast('PIN incorrecto', 'error');
     }
-  });
+  };
+
+  $('#loginBtn').addEventListener('click', doLogin);
+  pinInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
   $('#logoutBtn').addEventListener('click', async () => {
-    await supabase.auth.signOut();
-    email.value = '';
-    pass.value = '';
+    clearSession();
+    pinInput.value = '';
     show();
   });
 }
@@ -329,7 +335,7 @@ $('#batchDownloadBtn').addEventListener('click', async () => {
     let failed = 0;
     await Promise.all(files.map(async f => {
       try {
-        const blob = await (await fetch(f.url)).blob();
+        const blob = await (await fetch(fileUrl(f))).blob();
         zip.file(f.name, blob);
       } catch (e) { failed++; }
     }));
@@ -456,8 +462,8 @@ function renderGallery(files) {
     const isExcel = (f.mimetype && f.mimetype.includes('spreadsheet')) || (f.mimetype && f.mimetype.includes('excel')) || /\.xlsx?$/i.test(f.name);
     const isPpt = (f.mimetype && f.mimetype.includes('presentation')) || /\.pptx?$/i.test(f.name);
     let preview = '';
-    if (isImg) preview = `<img src="${thumbSrc(f)}" alt="${esc(displayName)}" loading="lazy" decoding="async">`;
-    else if (isVid) preview = `<div class="icon-placeholder"><i class="bi bi-play-circle"></i></div>`;
+    if (isImg && fileUrl(f)) preview = `<img src="${thumbSrc(f)}" alt="${esc(displayName)}" loading="lazy" decoding="async" onerror="this.style.display='none'">`;
+    else if (isVid && fileUrl(f)) preview = `<video class="card-video" src="${fileUrl(f)}#t=0.5" preload="metadata" muted playsinline></video><span class="video-play"><i class="bi bi-play-fill"></i></span>`;
     else if (isPdf) preview = `<div class="doc-icon-card doc-pdf"><i class="bi bi-file-earmark-pdf"></i></div>`;
     else if (isWord) preview = `<div class="doc-icon-card doc-word"><i class="bi bi-file-earmark-word"></i></div>`;
     else if (isExcel) preview = `<div class="doc-icon-card doc-excel"><i class="bi bi-file-earmark-excel"></i></div>`;
@@ -540,11 +546,19 @@ function renderGallery(files) {
   });
 }
 
-// Compressed thumbnail for the gallery (Supabase transforms the original on the fly).
+// Resolves the public URL of a file. Falls back to deriving it from
+// storage_path when the `url` column is missing (older/incomplete rows),
+// so thumbnails and downloads always work as long as the blob exists.
+function fileUrl(f) {
+  if (f && f.url) return f.url;
+  if (f && f.storage_path) return publicUrl(f.storage_path);
+  return '';
+}
+
+// Thumbnail for the gallery. Uses the original public URL directly (no
+// on-the-fly transform) so it always loads from the public bucket.
 function thumbSrc(f) {
-  if (!f || !f.url) return '';
-  if (f.mimetype && f.mimetype.startsWith('image/')) return `${f.url}?width=400&format=webp`;
-  return f.url;
+  return fileUrl(f);
 }
 
 $('#gridViewBtn').addEventListener('click', () => setView('grid'));
@@ -582,7 +596,7 @@ async function showDetail(id) {
   currentFile = f;
   const displayName = getDisplayName(f);
   $('#detailTitle').textContent = displayName;
-  const url = f.url;
+  const url = fileUrl(f);
   const isI = f.mimetype && f.mimetype.startsWith('image/'), isV = f.mimetype && f.mimetype.startsWith('video/'), isA = f.mimetype && f.mimetype.startsWith('audio/');
   let mh = ''; if (isI) mh = `<img class="detail-img" src="${url}" alt="${esc(displayName)}" loading="eager">`; else if (isV) mh = `<video class="detail-img" src="${url}" controls></video>`; else if (isA) mh = `<audio style="width:100%;margin-bottom:1rem;border-radius:var(--radius-sm);" src="${url}" controls></audio>`;
   const folderName = f.folder_id ? allFolders.find(fo => fo.id === f.folder_id)?.name || 'Otra' : 'Raíz';
@@ -595,14 +609,14 @@ async function downloadSingleFile(f) {
   if (!f) return;
   toast('Descargando...', 'info');
   try {
-    const res = await fetch(f.url);
+    const res = await fetch(fileUrl(f));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
     toast('Descargado', 'success');
   } catch (err) {
-    window.open(f.url, '_blank');
+    window.open(fileUrl(f), '_blank');
     toast('No se pudo descargar automáticamente, abriendo el archivo', 'info');
   }
 }

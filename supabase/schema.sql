@@ -50,6 +50,22 @@ drop policy if exists "public_files_all" on public.files;
 create policy "public_files_all" on public.files
   for all to public using (true) with check (true);
 
+-- ---------- PIN ACCESS TABLE ----------
+-- Stores the access PINs accepted by the app. The login form only
+-- asks for a PIN (no email/password) and validates it against this
+-- table using the publishable key.
+
+create table if not exists public.pins (
+  id  bigint generated always as identity primary key,
+  pin text not null unique
+);
+
+alter table public.pins enable row level security;
+
+drop policy if exists "public_pins_select" on public.pins;
+create policy "public_pins_select" on public.pins
+  for select to public using (true);
+
 -- ---------- STORAGE ----------
 
 insert into storage.buckets (id, name, public)
