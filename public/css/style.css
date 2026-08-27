@@ -1281,7 +1281,7 @@ main {
     box-shadow: var(--shadow-lg), 0 0 26px var(--primary-glow);
   }
 
-  .selection-count {
+  .selection-bar .selection-count {
     font-size: 0;
     line-height: 1;
   }
