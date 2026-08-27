@@ -35,6 +35,10 @@ function initAuth() {
   const doLogin = async () => {
     const pin = pinInput.value.trim();
     if (!pin) { toast('Ingresa tu PIN', 'error'); return; }
+    const btn = $('#loginBtn');
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = 'Verificando...';
     try {
       const ok = await verifyPin(pin);
       if (!ok) throw new Error('PIN incorrecto');
@@ -42,7 +46,11 @@ function initAuth() {
       pinInput.value = '';
       open();
     } catch (e) {
-      toast('PIN incorrecto', 'error');
+      const offline = !navigator.onLine || /fetch|network|Failed to fetch|load resource/i.test(e?.message || String(e));
+      toast(offline ? 'Sin conexión a internet. Revisa tu red e intenta de nuevo.' : 'PIN incorrecto', 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
     }
   };
 
@@ -54,6 +62,9 @@ function initAuth() {
     pinInput.value = '';
     show();
   });
+
+  window.addEventListener('offline', () => toast('Sin conexión a internet', 'error'));
+  window.addEventListener('online', () => toast('Conexión restablecida', 'success'));
 }
 
 const uploadModal = $('#uploadModal'), detailModal = $('#detailModal'), confirmModal = $('#confirmModal'),
@@ -99,9 +110,6 @@ async function loadContent() {
     renderBreadcrumb();
   }
   await loadFiles();
-  if (urlFolder) {
-    history.replaceState({ folderId: urlFolder }, '', window.location.pathname);
-  }
 }
 
 async function loadFiles() {
@@ -164,31 +172,20 @@ function navigateToFolder(id, updateUrl = true) {
   loadFiles();
   if (updateUrl) {
     if (id) {
-      const chain = getFolderPath(id);
-      const path = '/' + chain.map(f => slugify(f.name)).join('/');
-      history.pushState({ folderId: id }, '', path);
-    } else {
-      history.pushState({ folderId: null }, '', '/');
+      window.location.hash = id;
+    } else if (window.location.hash) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }
 }
 
-window.addEventListener('popstate', e => {
-  const id = e.state?.folderId ?? null;
-  navigateToFolder(id, false);
+window.addEventListener('hashchange', () => {
+  navigateToFolder(resolveFolderFromUrl(), false);
 });
 
 function resolveFolderFromUrl() {
-  const path = window.location.pathname;
-  if (path === '/') return null;
-  const segments = path.split('/').filter(Boolean);
-  let parentId = null;
-  for (const seg of segments) {
-    const match = allFolders.find(f => slugify(f.name) === seg && (f.parent_id || null) === (parentId || null));
-    if (!match) return null;
-    parentId = match.id;
-  }
-  return parentId;
+  const h = window.location.hash.replace(/^#/, '').trim();
+  return h || null;
 }
 
 function updateFolderSelect() {

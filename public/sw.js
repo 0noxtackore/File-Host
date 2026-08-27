@@ -1,5 +1,5 @@
-const CACHE = 'fh-v6';
-const PRECACHE = ['/', '/index.html', '/css/style.css', '/js/app.js', '/js/supabase.js', '/favicon.svg', '/manifest.json'];
+const CACHE = 'fh-v7';
+const PRECACHE = ['/', '/index.html', '/css/style.css', '/js/app.js', '/js/sb.js', '/images/favicon.png', '/images/logo.png', '/manifest.json'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE))); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k))))); self.clients.claim(); });
