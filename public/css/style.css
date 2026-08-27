@@ -377,7 +377,9 @@ main {
   z-index: 200;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
+  min-width: 440px;
   background: var(--bg-elevated);
   border: 1px solid var(--primary);
   border-radius: var(--radius-sm);
@@ -1261,12 +1263,58 @@ main {
   .modal-content { padding: 1.2rem; width: 95%; }
 
   .selection-bar {
-    flex-direction: column;
-    gap: 0.5rem;
-    align-items: stretch;
+    right: 20px;
+    left: auto;
+    bottom: 20px;
+    transform: none;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    gap: 0;
+    width: 62px;
+    height: 62px;
+    min-width: 0;
+    padding: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    animation: none;
+    box-shadow: var(--shadow-lg), 0 0 26px var(--primary-glow);
+  }
+
+  .selection-count {
+    font-size: 0;
+    line-height: 1;
+  }
+
+  .selection-count::before {
+    content: attr(data-count);
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--primary-light);
   }
 
   .selection-actions {
+    display: none;
+    position: absolute;
+    right: 0;
+    bottom: 76px;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 168px;
+    padding: 0.6rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    animation: slideUp 0.18s ease;
+  }
+
+  .selection-bar.open .selection-actions {
+    display: flex;
+  }
+
+  .selection-actions .btn {
+    width: 100%;
     justify-content: center;
   }
 }

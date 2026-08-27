@@ -279,6 +279,7 @@ function renderSelectionBar() {
   if (count === 0) { selectionBar.style.display = 'none'; return; }
   selectionBar.style.display = 'flex';
   selectionCount.textContent = `${count} seleccionado${count > 1 ? 's' : ''}`;
+  selectionCount.dataset.count = count;
   const allVisible = allFiles.map(f => String(f.id));
   const allSelected = allVisible.length > 0 && allVisible.every(id => selectedIds.has(id));
   const btn = $('#selectAllBtn');
@@ -286,6 +287,14 @@ function renderSelectionBar() {
 }
 
 $('#clearSelectionBtn').addEventListener('click', () => { selectedIds.clear(); gallery.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected')); renderSelectionBar(); });
+
+selectionBar.addEventListener('click', (e) => {
+  if (e.target.closest('button')) { selectionBar.classList.remove('open'); return; }
+  if (window.matchMedia('(max-width: 768px)').matches) selectionBar.classList.toggle('open');
+});
+document.addEventListener('click', (e) => {
+  if (window.matchMedia('(max-width: 768px)').matches && !selectionBar.contains(e.target)) selectionBar.classList.remove('open');
+});
 
 $('#selectAllBtn').addEventListener('click', () => {
   const allVisible = allFiles.map(f => String(f.id));
